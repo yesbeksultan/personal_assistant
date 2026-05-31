@@ -11,9 +11,10 @@ struct AddTransactionView: View {
     @State private var category = "🍔 Еда"
     @State private var date = Date()
     @State private var note = ""
+    @State private var showAddCategorySheet = false
     
     var categories: [String] {
-        type == .expense ? expenseCategories : incomeCategories
+        FinanceCategoryStore.shared.allCategories(for: type)
     }
     
     private var suggestedTitles: [String] {
@@ -26,11 +27,29 @@ struct AddTransactionView: View {
         case "💊 Здоровье": return ["Аптека", "Врач", "Анализы", "Витамины"]
         case "💡 Коммуналка": return ["Свет", "Вода", "Интернет", "Отопление"]
         case "📱 Связь": return ["Мобильная связь", "Баланс", "Роуминг"]
-        case "💼 Зарплата": return ["Аванс", "Остаток", "Премия"]
+        case "💼 Зарплата": return ["Зарплата", "Аванс", "Премия", "Остаток"]
         case "💰 Фриланс": return ["Проект", "Консультация", "Дизайн"]
         case "📈 Инвестиции": return ["Акции", "Крипта", "Дивиденды"]
         case "🎁 Подарки": return ["День рождения", "Свадьба", "Праздник"]
-        default: return ["Перевод", "Покупка", "Оплата", "Услуга"]
+        default:
+            // Custom category suggestions from store
+            if let custom = FinanceCategoryStore.shared.suggestions(for: category), !custom.isEmpty {
+                return custom
+            }
+            
+            // Default fallback based on type (income/expense)
+            let cleanCategory: String
+            if let spaceIndex = category.firstIndex(of: " ") {
+                cleanCategory = String(category[category.index(after: spaceIndex)...])
+            } else {
+                cleanCategory = category
+            }
+            
+            if type == .income {
+                return [cleanCategory, "Перевод", "Подарок", "Кэшбэк", "Поступление"]
+            } else {
+                return [cleanCategory, "Покупка", "Оплата", "Услуга", "Подписка"]
+            }
         }
     }
     
@@ -114,6 +133,21 @@ struct AddTransactionView: View {
                                             .clipShape(Capsule())
                                     }
                                 }
+                                
+                                Button {
+                                    showAddCategorySheet = true
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "plus")
+                                        Text("Создать")
+                                    }
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(Color(hex: "667eea"))
+                                    .padding(.horizontal, 12).padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity)
+                                    .background(Color(hex: "667eea").opacity(0.1))
+                                    .clipShape(Capsule())
+                                }
                             }
                         }
                         
@@ -144,6 +178,13 @@ struct AddTransactionView: View {
                         .disabled(title.isEmpty || amountText.isEmpty)
                 }
             }
+            .sheet(isPresented: $showAddCategorySheet) {
+                AddCategorySheet(type: type) { name, suggestions in
+                    FinanceCategoryStore.shared.addCategory(name, type: type, suggestions: suggestions)
+                    category = name
+                }
+                .presentationDetents([.medium])
+            }
         }
     }
     
@@ -152,5 +193,64 @@ struct AddTransactionView: View {
         let tx = Transaction(title: title, amount: amount, type: type, category: category, date: date, note: note)
         modelContext.insert(tx)
         dismiss()
+    }
+}
+
+// MARK: - Add Category Sheet
+
+struct AddCategorySheet: View {
+    let type: TransactionType
+    let onAdd: (String, [String]) -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var name = ""
+    @State private var suggestionsText = ""
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppColors.appBackground.ignoresSafeArea()
+                
+                VStack(spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Название категории").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                        TextField("Например: 🍿 Кино или 🛠️ Ремонт", text: $name)
+                            .textFieldStyle(.plain).foregroundStyle(AppColors.textPrimary).padding(14)
+                            .background(AppColors.textPrimary.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Подсказки для названий (через запятую)").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                        TextField("Например: Билеты, Попкорн, Напитки", text: $suggestionsText)
+                            .textFieldStyle(.plain).foregroundStyle(AppColors.textPrimary).padding(14)
+                            .background(AppColors.textPrimary.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    
+                    Spacer()
+                }
+                .padding()
+            }
+            .navigationTitle("Новая категория")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Отмена") { dismiss() }.foregroundStyle(AppColors.textPrimary.opacity(0.7))
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Добавить") {
+                        let nameTrimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let list = suggestionsText
+                            .components(separatedBy: ",")
+                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty }
+                        
+                        onAdd(nameTrimmed, list)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold).foregroundStyle(Color(hex: "667eea"))
+                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
     }
 }
