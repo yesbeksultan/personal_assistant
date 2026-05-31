@@ -7,7 +7,7 @@ struct ChatView: View {
     @Query(sort: \ChatSession.createdAt, order: .reverse) private var sessions: [ChatSession]
     @Environment(\.modelContext) private var modelContext
     @State private var selectedSession: ChatSession? = nil
-    @State private var showNewChat = false
+    @State private var newSession: ChatSession? = nil
 
     var body: some View {
         NavigationStack {
@@ -32,7 +32,10 @@ struct ChatView: View {
                 }
             }
             .navigationDestination(item: $selectedSession) { session in
-                ChatDetailView(session: session)
+                ChatDetailView(session: session, isNew: false)
+            }
+            .navigationDestination(item: $newSession) { session in
+                ChatDetailView(session: session, isNew: true)
             }
         }
     }
@@ -81,6 +84,7 @@ struct ChatView: View {
             LazyVStack(spacing: 12) {
                 ForEach(sessions) { session in
                     SessionCard(session: session) {
+                        newSession = nil
                         selectedSession = session
                     } onDelete: {
                         withAnimation(.spring(response: 0.4)) {
@@ -99,7 +103,7 @@ struct ChatView: View {
     private func createNewSession() {
         let s = ChatSession(title: "Новый чат")
         modelContext.insert(s)
-        selectedSession = s
+        newSession = s
     }
 }
 
@@ -195,6 +199,7 @@ private struct SessionCard: View {
 
 struct ChatDetailView: View {
     let session: ChatSession
+    let isNew: Bool
     @Query private var messages: [ChatMessage]
     @Query private var tasks: [TaskItem]
     @Query private var transactions: [Transaction]
@@ -205,8 +210,9 @@ struct ChatDetailView: View {
     @State private var showRenameAlert = false
     @State private var newChatTitle = ""
 
-    init(session: ChatSession) {
+    init(session: ChatSession, isNew: Bool = false) {
         self.session = session
+        self.isNew = isNew
         let sessionID = session.id
         self._messages = Query(
             filter: #Predicate<ChatMessage> { $0.session?.id == sessionID },
@@ -271,6 +277,12 @@ struct ChatDetailView: View {
         .onAppear {
             viewModel.session = session
             newChatTitle = session.title
+        }
+        .onDisappear {
+            // Если чат новый и пустой — удаляем без сохранения
+            if isNew && messages.isEmpty {
+                modelContext.delete(session)
+            }
         }
         .alert("Переименовать чат", isPresented: $showRenameAlert) {
             TextField("Название", text: $newChatTitle)

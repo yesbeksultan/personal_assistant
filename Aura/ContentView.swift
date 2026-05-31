@@ -10,27 +10,28 @@ import SwiftData
 
 struct ContentView: View {
     @AppStorage("appTheme") private var appTheme: String = "dark"
+    @StateObject private var prefs = TabPreferences.shared
 
     var body: some View {
         TabView {
+            // Главная — всегда первая, не убирается
             DashboardView()
                 .tabItem {
                     Label("Главная", systemImage: "square.grid.2x2")
                 }
-            
-            TasksView()
+
+            // Пользовательские вкладки (до 3)
+            ForEach(prefs.mainTabs) { tab in
+                tab.makeView()
+                    .tabItem {
+                        Label(tab.title, systemImage: tab.icon)
+                    }
+            }
+
+            // «Ещё» — всегда последняя
+            MoreView()
                 .tabItem {
-                    Label("Задачи", systemImage: "checkmark.circle")
-                }
-            
-            ChatView()
-                .tabItem {
-                    Label("Friday AI", systemImage: "sparkles")
-                }
-            
-            FinanceView()
-                .tabItem {
-                    Label("Финансы", systemImage: "creditcard")
+                    Label("Ещё", systemImage: "ellipsis")
                 }
         }
         .preferredColorScheme(appTheme == "dark" ? .dark : .light)
