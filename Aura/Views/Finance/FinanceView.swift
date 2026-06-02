@@ -6,6 +6,7 @@ struct FinanceView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel = FinanceViewModel()
     @State private var showAddTransaction = false
+    @State private var editingTransaction: Transaction? = nil
     
     var body: some View {
         NavigationStack {
@@ -35,6 +36,16 @@ struct FinanceView: View {
                 }
             }
             .sheet(isPresented: $showAddTransaction) { AddTransactionView() }
+            .sheet(
+                isPresented: Binding(
+                    get: { editingTransaction != nil },
+                    set: { if !$0 { editingTransaction = nil } }
+                )
+            ) {
+                if let tx = editingTransaction {
+                    EditTransactionView(transaction: tx)
+                }
+            }
         }
     }
     
@@ -141,8 +152,32 @@ struct FinanceView: View {
             } else {
                 ForEach(filtered, id: \.id) { tx in
                     TransactionRow(transaction: tx)
+                        .contentShape(Rectangle())
+                        .onTapGesture { editingTransaction = tx }
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                editingTransaction = tx
+                            } label: {
+                                Label("Изменить", systemImage: "pencil")
+                            }
+                            .tint(Color(hex: "667eea"))
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                withAnimation { modelContext.delete(tx) }
+                            } label: {
+                                Label("Удалить", systemImage: "trash")
+                            }
+                        }
                         .contextMenu {
-                            Button(role: .destructive) { withAnimation { modelContext.delete(tx) } } label: {
+                            Button {
+                                editingTransaction = tx
+                            } label: {
+                                Label("Изменить", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                withAnimation { modelContext.delete(tx) }
+                            } label: {
                                 Label("Удалить", systemImage: "trash")
                             }
                         }
