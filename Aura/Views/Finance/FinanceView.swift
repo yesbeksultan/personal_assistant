@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import LocalAuthentication
 
 struct FinanceView: View {
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
@@ -7,6 +8,8 @@ struct FinanceView: View {
     @State private var viewModel = FinanceViewModel()
     @State private var showAddTransaction = false
     @State private var editingTransaction: Transaction? = nil
+    @State private var isSensitiveUnlocked: Bool = false
+    @State private var authError: String? = nil
     
     var body: some View {
         NavigationStack {
@@ -46,6 +49,20 @@ struct FinanceView: View {
                     EditTransactionView(transaction: tx)
                 }
             }
+            .alert(
+                "Ошибка аутентификации",
+                isPresented: Binding(
+                    get: { authError != nil },
+                    set: { if !$0 { authError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(authError ?? "")
+            }
+            .onAppear {
+                isSensitiveUnlocked = false
+            }
         }
     }
     
@@ -56,9 +73,22 @@ struct FinanceView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(AppColors.textPrimary.opacity(0.4))
             let bal = viewModel.balance(transactions)
-            Text(bal.currencyFormatted)
-                .font(.system(size: 34, weight: .semibold, design: .rounded))
-                .foregroundStyle(bal >= 0 ? Color(hex: "43e97b") : Color(hex: "fa709a"))
+            if isSensitiveUnlocked {
+                Text(bal.currencyFormatted)
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .foregroundStyle(bal >= 0 ? Color(hex: "43e97b") : Color(hex: "fa709a"))
+            } else {
+                Text("••••••")
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                Button {
+                    authenticate()
+                } label: {
+                    Label("Показать", systemImage: "faceid")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(Color(hex: "667eea"))
+            }
         }
         .frame(maxWidth: .infinity).padding(24)
         .background(AppColors.textPrimary.opacity(0.04))
@@ -95,8 +125,14 @@ struct FinanceView: View {
                     Image(systemName: "arrow.down.left").font(.system(size: 12)).foregroundStyle(Color(hex: "43e97b"))
                     Text("Доходы").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.6))
                 }
-                Text(viewModel.totalIncome(transactions).currencyFormatted)
-                    .font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(AppColors.textPrimary)
+                if isSensitiveUnlocked {
+                    Text(viewModel.totalIncome(transactions).currencyFormatted)
+                        .font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(AppColors.textPrimary)
+                } else {
+                    Text("••••••")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(14)
             .background(Color(hex: "43e97b").opacity(0.1)).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -106,8 +142,14 @@ struct FinanceView: View {
                     Image(systemName: "arrow.up.right").font(.system(size: 12)).foregroundStyle(Color(hex: "fa709a"))
                     Text("Расходы").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.6))
                 }
-                Text(viewModel.totalExpenses(transactions).currencyFormatted)
-                    .font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(AppColors.textPrimary)
+                if isSensitiveUnlocked {
+                    Text(viewModel.totalExpenses(transactions).currencyFormatted)
+                        .font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(AppColors.textPrimary)
+                } else {
+                    Text("••••••")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading).padding(14)
             .background(Color(hex: "fa709a").opacity(0.1)).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -125,13 +167,18 @@ struct FinanceView: View {
                         HStack {
                             Text(item.category).font(.subheadline).foregroundStyle(AppColors.textPrimary)
                             Spacer()
-                            Text(item.amount.currencyFormatted).font(.subheadline).fontWeight(.medium).foregroundStyle(AppColors.textPrimary)
-                            Text("\(Int(item.percentage * 100))%").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                            if isSensitiveUnlocked {
+                                Text(item.amount.currencyFormatted).font(.subheadline).fontWeight(.medium).foregroundStyle(AppColors.textPrimary)
+                                Text("\(Int(item.percentage * 100))%").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                            } else {
+                                Text("••••••").font(.subheadline).fontWeight(.medium).foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                                Text("—").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.3))
+                            }
                         }
                         GeometryReader { geo in
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(LinearGradient(colors: AppGradients.purple, startPoint: .leading, endPoint: .trailing))
-                                .frame(width: geo.size.width * item.percentage, height: 6)
+                                .frame(width: isSensitiveUnlocked ? geo.size.width * item.percentage : 0, height: 6)
                         }.frame(height: 6)
                     }
                 }
@@ -151,7 +198,7 @@ struct FinanceView: View {
                     .frame(maxWidth: .infinity).padding(20)
             } else {
                 ForEach(filtered, id: \.id) { tx in
-                    TransactionRow(transaction: tx)
+                    TransactionRow(transaction: tx, isSensitiveUnlocked: isSensitiveUnlocked)
                         .contentShape(Rectangle())
                         .onTapGesture { editingTransaction = tx }
                         .swipeActions(edge: .leading) {
@@ -186,10 +233,46 @@ struct FinanceView: View {
         }
         .padding(16).background(AppColors.textPrimary.opacity(0.05)).clipShape(RoundedRectangle(cornerRadius: 20))
     }
+    
+    private func authenticate() {
+        let context = LAContext()
+        var error: NSError?
+        let reason = "Показать баланс и суммы доходов/расходов"
+        
+        // Avoid Face ID crash if NSFaceIDUsageDescription is missing in Info.plist
+        let hasFaceIDUsageDescription = Bundle.main.object(forInfoDictionaryKey: "NSFaceIDUsageDescription") as? String != nil
+        
+        if hasFaceIDUsageDescription, context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, evalError in
+                DispatchQueue.main.async {
+                    if success {
+                        self.isSensitiveUnlocked = true
+                    } else {
+                        self.authError = (evalError as NSError?)?.localizedDescription ?? "Не удалось пройти аутентификацию"
+                    }
+                }
+            }
+        } else if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, evalError in
+                DispatchQueue.main.async {
+                    if success {
+                        self.isSensitiveUnlocked = true
+                    } else {
+                        self.authError = (evalError as NSError?)?.localizedDescription ?? "Не удалось пройти аутентификацию"
+                    }
+                }
+            }
+        } else {
+            DispatchQueue.main.async {
+                self.authError = error?.localizedDescription ?? "Face ID/Touch ID недоступен"
+            }
+        }
+    }
 }
 
 struct TransactionRow: View {
     let transaction: Transaction
+    let isSensitiveUnlocked: Bool
     var body: some View {
         HStack(spacing: 12) {
             Circle()
@@ -205,9 +288,15 @@ struct TransactionRow: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(transaction.type == .income ? "+" : "-")\(transaction.amount.currencyFormatted)")
-                    .font(.subheadline).fontWeight(.semibold)
-                    .foregroundStyle(transaction.type == .income ? Color(hex: "43e97b") : Color(hex: "fa709a"))
+                if isSensitiveUnlocked {
+                    Text("\(transaction.type == .income ? "+" : "-")\(transaction.amount.currencyFormatted)")
+                        .font(.subheadline).fontWeight(.semibold)
+                        .foregroundStyle(transaction.type == .income ? Color(hex: "43e97b") : Color(hex: "fa709a"))
+                } else {
+                    Text("••••••")
+                        .font(.subheadline).fontWeight(.semibold)
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                }
                 Text(transaction.date.shortFormatted).font(.caption2).foregroundStyle(AppColors.textPrimary.opacity(0.3))
             }
         }

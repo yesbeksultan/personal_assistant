@@ -20,9 +20,6 @@ struct DashboardView: View {
                     // Today's tasks
                     todayTasksSection
                     
-                    // Financial summary
-                    financeSummarySection
-                    
                     // Spending chart
                     spendingChartSection
                 }
@@ -149,35 +146,6 @@ struct DashboardView: View {
                 ForEach(todayTasks.prefix(5), id: \.id) { task in
                     DashboardTaskRow(task: task)
                 }
-            }
-        }
-        .padding(16)
-        .background(AppColors.textPrimary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-    }
-    
-    // MARK: - Finance Summary
-    
-    private var financeSummarySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Финансы за месяц")
-                .font(.headline)
-                .foregroundStyle(AppColors.textPrimary)
-            
-            HStack(spacing: 12) {
-                FinanceMiniCard(
-                    title: "Доходы",
-                    amount: monthIncome,
-                    icon: "arrow.down.left",
-                    color: Color(hex: "43e97b")
-                )
-                
-                FinanceMiniCard(
-                    title: "Расходы",
-                    amount: monthExpenses,
-                    icon: "arrow.up.right",
-                    color: Color(hex: "fa709a")
-                )
             }
         }
         .padding(16)
@@ -380,34 +348,6 @@ struct DashboardTaskRow: View {
         case .high: return "fa709a"
         case .urgent: return "f5576c"
         }
-    }
-}
-
-struct FinanceMiniCard: View {
-    let title: String
-    let amount: Double
-    let icon: String
-    let color: Color
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 12))
-                    .foregroundStyle(color)
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.6))
-            }
-            
-            Text(amount.currencyFormatted)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(AppColors.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(color.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
