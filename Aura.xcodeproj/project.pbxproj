@@ -52,6 +52,7 @@
 		F9592AE52FC3452600118CEB /* auraUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = auraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9592B952FC36D1B00118CEB /* watermarked_img_3925613561904820452_1024x1024.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = watermarked_img_3925613561904820452_1024x1024.png; sourceTree = "<group>"; };
 		F9CFC5F72FCF3BFD00B78345 /* EditTransactionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTransactionView.swift; sourceTree = "<group>"; };
+		F9CFC5FA2FCF41B300B78345 /* ManageCategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageCategoriesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -167,6 +168,7 @@
 				B10015 /* FinanceView.swift */,
 				B10016 /* AddTransactionView.swift */,
 				F9CFC5F72FCF3BFD00B78345 /* EditTransactionView.swift */,
+				F9CFC5FA2FCF41B300B78345 /* ManageCategoriesView.swift */,
 			);
 			path = Finance;
 			sourceTree = "<group>";

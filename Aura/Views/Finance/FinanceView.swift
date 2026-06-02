@@ -10,6 +10,7 @@ struct FinanceView: View {
     @State private var editingTransaction: Transaction? = nil
     @State private var isSensitiveUnlocked: Bool = false
     @State private var authError: String? = nil
+    @State private var showManageCategories = false
     
     var body: some View {
         NavigationStack {
@@ -31,6 +32,13 @@ struct FinanceView: View {
             .navigationTitle("Финансы")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { showManageCategories = true } label: {
+                        Image(systemName: "tag")
+                            .font(.system(size: 17, weight: .regular))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.65))
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { showAddTransaction = true } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 17, weight: .regular))
@@ -48,6 +56,9 @@ struct FinanceView: View {
                 if let tx = editingTransaction {
                     EditTransactionView(transaction: tx)
                 }
+            }
+            .sheet(isPresented: $showManageCategories) {
+                ManageCategoriesView()
             }
             .alert(
                 "Ошибка аутентификации",
