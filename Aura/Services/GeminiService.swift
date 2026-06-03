@@ -1,6 +1,13 @@
 import Combine
 import Foundation
 
+public enum FinancePeriod: String, CaseIterable, Equatable {
+    case day = "День"
+    case week = "Неделя"
+    case month = "Месяц"
+    case year = "Год"
+}
+
 /// Service for communicating with Google Gemini API
 final class GeminiService: ObservableObject {
     static let shared = GeminiService()
@@ -27,7 +34,7 @@ final class GeminiService: ObservableObject {
     
     // MARK: - Public Methods
     
-    func sendMessage(_ message: String, context: [ChatMessage] = [], tasks: [TaskItem] = [], transactions: [Transaction] = []) async throws -> String {
+    func sendMessage(_ message: String, period: FinancePeriod? = nil, context: [ChatMessage] = [], tasks: [TaskItem] = [], transactions: [Transaction] = []) async throws -> String {
         guard !apiKey.isEmpty else {
             return "⚠️ API ключ не настроен. Перейди в Настройки → введи свой Gemini API ключ.\n\nПолучить ключ: https://aistudio.google.com/"
         }
@@ -43,17 +50,40 @@ final class GeminiService: ObservableObject {
         
         // Add system instruction
         var dynamicPrompt = systemPrompt
-        if !tasks.isEmpty || !transactions.isEmpty {
+        
+        let txForContext: [Transaction]
+        if let period = period {
+            txForContext = filter(transactions: transactions, by: period)
+        } else {
+            txForContext = transactions
+        }
+        
+        if !tasks.isEmpty || !txForContext.isEmpty {
             dynamicPrompt += "\n\nТекущий контекст пользователя:\n"
             let pendingTasks = tasks.filter { !$0.isCompleted }
             dynamicPrompt += "Незавершённых задач: \(pendingTasks.count). "
             if !pendingTasks.isEmpty {
                 dynamicPrompt += "Некоторые из них: " + pendingTasks.prefix(3).map { $0.title }.joined(separator: ", ") + ".\n"
             }
-            let monthTransactions = transactions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .month) }
-            let monthIncome = monthTransactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-            let monthExpense = monthTransactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
-            dynamicPrompt += "В этом месяце доход: \(monthIncome) ₸, расход: \(monthExpense) ₸."
+            if let period = period {
+                let income = txForContext.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+                let expense = txForContext.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+                dynamicPrompt += "Финансы за период (\(period.rawValue)): доход: \(income) ₸, расход: \(expense) ₸.\n"
+                if !txForContext.isEmpty {
+                    dynamicPrompt += "Список транзакций (\(txForContext.count) шт.):\n"
+                    let df = DateFormatter(); df.locale = Locale(identifier: "ru_RU"); df.dateFormat = "dd.MM.yyyy"
+                    for tx in txForContext {
+                        let sign = tx.type == .income ? "+" : "-"
+                        let line = "- \(df.string(from: tx.date)) [\(tx.type.rawValue)] \(tx.title) — \(sign)\(Int(tx.amount)) ₸ (\(tx.category))"
+                        dynamicPrompt += line + "\n"
+                    }
+                }
+            } else {
+                let monthTransactions = transactions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .month) }
+                let monthIncome = monthTransactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+                let monthExpense = monthTransactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+                dynamicPrompt += "В этом месяце доход: \(monthIncome) ₸, расход: \(monthExpense) ₸."
+            }
         }
         
         let systemInstruction: [String: Any] = [
@@ -150,6 +180,22 @@ final class GeminiService: ObservableObject {
     
     var hasApiKey: Bool {
         !apiKey.isEmpty
+    }
+    
+    private func filter(transactions: [Transaction], by period: FinancePeriod) -> [Transaction] {
+        let cal = Calendar.current
+        return transactions.filter { tx in
+            switch period {
+            case .day:
+                return cal.isDateInToday(tx.date)
+            case .week:
+                return cal.isDate(tx.date, equalTo: Date(), toGranularity: .weekOfYear)
+            case .month:
+                return cal.isDate(tx.date, equalTo: Date(), toGranularity: .month)
+            case .year:
+                return cal.isDate(tx.date, equalTo: Date(), toGranularity: .year)
+            }
+        }
     }
 }
 

@@ -209,6 +209,7 @@ struct ChatDetailView: View {
     @FocusState private var isInputFocused: Bool
     @State private var showRenameAlert = false
     @State private var newChatTitle = ""
+    @State private var showFunctionPicker = false
 
     init(session: ChatSession, isNew: Bool = false) {
         self.session = session
@@ -409,7 +410,46 @@ struct ChatDetailView: View {
         VStack(spacing: 0) {
             Divider().opacity(0.1)
 
-            HStack(spacing: 12) {
+            // Active function chip
+            if let fn = viewModel.activeFunction {
+                activeFunctionChip(fn)
+            }
+
+            // Period picker row (when finance active)
+            if viewModel.activeFunction == .finance {
+                periodPickerRow
+            }
+
+            HStack(spacing: 8) {
+                // Function picker button
+                Button {
+                    withAnimation(.spring(response: 0.35)) {
+                        if viewModel.activeFunction != nil {
+                            viewModel.clearActiveFunction()
+                            showFunctionPicker = false
+                        } else {
+                            showFunctionPicker.toggle()
+                            isInputFocused = false
+                        }
+                    }
+                } label: {
+                    let isActive = viewModel.activeFunction != nil
+                    ZStack {
+                        Circle()
+                            .fill(isActive
+                                ? AppColors.textPrimary.opacity(0.18)
+                                : AppColors.textPrimary.opacity(0.07))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: isActive ? "xmark" : "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(isActive
+                                ? AppColors.textPrimary.opacity(0.8)
+                                : AppColors.textPrimary.opacity(0.45))
+                            .rotationEffect(.degrees(showFunctionPicker && !isActive ? 45 : 0))
+                    }
+                }
+                .animation(.spring(response: 0.3), value: viewModel.activeFunction != nil)
+
                 TextField("Спроси Friday...", text: $viewModel.messageText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .foregroundStyle(AppColors.textPrimary)
@@ -451,10 +491,150 @@ struct ChatDetailView: View {
                 .disabled(viewModel.messageText.isEmpty || viewModel.isLoading)
                 .animation(.spring(response: 0.3), value: viewModel.messageText.isEmpty)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(AppColors.appBackground)
+
+            // Function picker popup
+            if showFunctionPicker && viewModel.activeFunction == nil {
+                functionPickerPopup
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
+    }
+
+    // MARK: - Active Function Chip
+
+    private func activeFunctionChip(_ fn: ChatFunction) -> some View {
+        HStack(spacing: 6) {
+            Text(fn.emoji)
+                .font(.system(size: 13))
+            Text(fn.rawValue)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(AppColors.textPrimary.opacity(0.75))
+            if let period = viewModel.selectedPeriod {
+                Text("· \(period.rawValue)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+            }
+            Spacer()
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(AppColors.textPrimary.opacity(0.35))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(AppColors.textPrimary.opacity(0.07))
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    // MARK: - Period Picker Row
+
+    private var periodPickerRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(FinancePeriod.allCases, id: \.self) { period in
+                    let isSelected = viewModel.selectedPeriod == period
+                    Button {
+                        withAnimation(.spring(response: 0.3)) {
+                            viewModel.selectedPeriod = isSelected ? nil : period
+                        }
+                    } label: {
+                        Text(period.rawValue)
+                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                            .foregroundStyle(isSelected
+                                ? AppColors.textPrimary
+                                : AppColors.textPrimary.opacity(0.5))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(isSelected
+                                        ? AppColors.textPrimary.opacity(0.14)
+                                        : AppColors.textPrimary.opacity(0.06))
+                            )
+                            .overlay(
+                                Capsule()
+                                    .stroke(isSelected
+                                        ? AppColors.textPrimary.opacity(0.25)
+                                        : Color.clear, lineWidth: 1)
+                            )
+                    }
+                    .animation(.spring(response: 0.25), value: isSelected)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    // MARK: - Function Picker Popup
+
+    private var functionPickerPopup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Контекст для ассистента")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            ForEach(ChatFunction.allCases) { fn in
+                Button {
+                    withAnimation(.spring(response: 0.35)) {
+                        viewModel.activeFunction = fn
+                        showFunctionPicker = false
+                        // default to week
+                        viewModel.selectedPeriod = .week
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(AppColors.textPrimary.opacity(0.08))
+                                .frame(width: 34, height: 34)
+                            Image(systemName: fn.icon)
+                                .font(.system(size: 15))
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(fn.rawValue)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(AppColors.textPrimary)
+                            Text(fn == .finance ? "Передаёт список транзакций" : "")
+                                .font(.system(size: 12))
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.2))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+            }
+
+            Spacer(minLength: 8)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(AppColors.appBackground)
+                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: -4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(AppColors.textPrimary.opacity(0.07), lineWidth: 1)
+        )
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
     }
 }
 

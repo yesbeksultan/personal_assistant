@@ -2,12 +2,31 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+enum ChatFunction: String, CaseIterable, Identifiable {
+    case finance = "Финансы"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .finance: return "chart.bar.fill"
+        }
+    }
+    var emoji: String {
+        switch self {
+        case .finance: return "💰"
+        }
+    }
+}
+
 @Observable
 class ChatViewModel {
     var messageText = ""
     var isLoading = false
     var errorMessage: String? = nil
     var session: ChatSession?
+    
+    // Active function context
+    var activeFunction: ChatFunction? = nil
+    var selectedPeriod: FinancePeriod? = nil
     
     private let geminiService = GeminiService.shared
     
@@ -29,7 +48,8 @@ class ChatViewModel {
         errorMessage = nil
         
         do {
-            let response = try await geminiService.sendMessage(text, context: messages, tasks: tasks, transactions: transactions)
+            let period = (activeFunction == .finance) ? selectedPeriod : nil
+            let response = try await geminiService.sendMessage(text, period: period, context: messages, tasks: tasks, transactions: transactions)
             let aiMessage = ChatMessage(content: response, isFromUser: false, session: session)
             context.insert(aiMessage)
         } catch {
@@ -39,6 +59,11 @@ class ChatViewModel {
         }
         
         isLoading = false
+    }
+    
+    func clearActiveFunction() {
+        activeFunction = nil
+        selectedPeriod = nil
     }
     
     @MainActor

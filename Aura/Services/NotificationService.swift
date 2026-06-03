@@ -2,9 +2,26 @@ import Foundation
 import UserNotifications
 
 /// Service for managing local notifications
-class NotificationService {
+class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationService()
-    private init() {}
+    
+    private override init() {
+        super.init()
+    }
+
+    func setupNotificationDelegate() {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Show notifications even when the app is active/foreground
+        completionHandler([.banner, .sound, .list, .badge])
+    }
 
     // MARK: - Identifiers
     private enum ID {

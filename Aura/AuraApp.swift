@@ -10,6 +10,19 @@ import SwiftData
 
 @main
 struct fridayApp: App {
+    init() {
+        // Register default notification settings
+        NotificationDefaults.registerDefaults()
+        
+        // Setup notification delegate and request permissions / reschedule
+        NotificationService.shared.setupNotificationDelegate()
+        NotificationService.shared.requestPermission { granted in
+            if granted {
+                NotificationService.shared.rescheduleAll()
+            }
+        }
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()

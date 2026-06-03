@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		F9592B962FC36D1B00118CEB /* watermarked_img_3925613561904820452_1024x1024.png in Resources */ = {isa = PBXBuildFile; fileRef = F9592B952FC36D1B00118CEB /* watermarked_img_3925613561904820452_1024x1024.png */; };
+		F99EE5192FD0AC0300B70C12 /* IMG_1804.png in Resources */ = {isa = PBXBuildFile; fileRef = F99EE5182FD0AC0300B70C12 /* IMG_1804.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,7 +50,7 @@
 		F9592ACF2FC3452500118CEB /* Friday.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Friday.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9592ADB2FC3452600118CEB /* auraTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = auraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9592AE52FC3452600118CEB /* auraUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = auraUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		F9592B952FC36D1B00118CEB /* watermarked_img_3925613561904820452_1024x1024.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = watermarked_img_3925613561904820452_1024x1024.png; sourceTree = "<group>"; };
+		F99EE5182FD0AC0300B70C12 /* IMG_1804.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = IMG_1804.png; sourceTree = "<group>"; };
 		F9CFC5F72FCF3BFD00B78345 /* EditTransactionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTransactionView.swift; sourceTree = "<group>"; };
 		F9CFC5FA2FCF41B300B78345 /* ManageCategoriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageCategoriesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -89,7 +89,7 @@
 		D10001 = {
 			isa = PBXGroup;
 			children = (
-				F9592B952FC36D1B00118CEB /* watermarked_img_3925613561904820452_1024x1024.png */,
+				F99EE5182FD0AC0300B70C12 /* IMG_1804.png */,
 				D10002 /* Aura */,
 				F9592AD02FC3452500118CEB /* aura */,
 				F9592ADE2FC3452600118CEB /* auraTests */,
@@ -335,7 +335,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F9592B962FC36D1B00118CEB /* watermarked_img_3925613561904820452_1024x1024.png in Resources */,
+				F99EE5192FD0AC0300B70C12 /* IMG_1804.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -530,6 +530,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = B3G343W3JM;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -616,6 +617,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = B3G343W3JM;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
