@@ -1,9 +1,11 @@
 import SwiftUI
 import SwiftData
+import EventKit
 
 struct DashboardView: View {
     @Query private var tasks: [TaskItem]
     @Query private var transactions: [Transaction]
+    @State private var calendarService = CalendarService.shared
     @State private var showSettings = false
     @State private var greeting = ""
     
@@ -16,6 +18,11 @@ struct DashboardView: View {
                     
                     // Quick stats
                     statsGrid
+                    
+                    // Today's calendar events
+                    if calendarService.isAuthorized {
+                        todayCalendarSection
+                    }
                     
                     // Today's tasks
                     todayTasksSection
@@ -44,6 +51,7 @@ struct DashboardView: View {
         }
         .onAppear {
             updateGreeting()
+            Task { await calendarService.fetchEvents(daysAhead: 7) }
         }
     }
     
@@ -108,6 +116,52 @@ struct DashboardView: View {
         }
     }
     
+    // MARK: - Today's Calendar Events
+
+    private var todayCalendarSection: some View {
+        let events = calendarService.todayEvents
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Календарь сегодня")
+                    .font(.headline)
+                    .foregroundStyle(AppColors.textPrimary)
+                Spacer()
+                if !events.isEmpty {
+                    Text("\(events.count)")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundStyle(AppColors.textPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color(hex: "5ee7df").opacity(0.4))
+                        .clipShape(Capsule())
+                }
+            }
+
+            if events.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 14, weight: .light))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.3))
+                    Text("Нет событий на сегодня")
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                        .font(.subheadline)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(AppColors.textPrimary.opacity(0.04))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            } else {
+                ForEach(events.prefix(4)) { event in
+                    CalendarEventRow(event: event)
+                }
+            }
+        }
+        .padding(16)
+        .background(AppColors.textPrimary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
     // MARK: - Today's Tasks
     
     private var todayTasksSection: some View {

@@ -206,6 +206,7 @@ struct ChatDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ChatViewModel()
+    @State private var calendarService = CalendarService.shared
     @FocusState private var isInputFocused: Bool
     @State private var showRenameAlert = false
     @State private var newChatTitle = ""
@@ -327,7 +328,8 @@ struct ChatDetailView: View {
                                     context: modelContext,
                                     messages: messages,
                                     tasks: tasks,
-                                    transactions: transactions
+                                    transactions: transactions,
+                                    events: calendarService.upcomingEvents
                                 )
                             }
                         }
@@ -473,7 +475,8 @@ struct ChatDetailView: View {
                             context: modelContext,
                             messages: messages,
                             tasks: tasks,
-                            transactions: transactions
+                            transactions: transactions,
+                            events: calendarService.upcomingEvents
                         )
                     }
                     isInputFocused = false
@@ -607,7 +610,7 @@ struct ChatDetailView: View {
                             Text(fn.rawValue)
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(AppColors.textPrimary)
-                            Text(fn == .finance ? "Передаёт список транзакций" : "")
+                            Text(fn.description)
                                 .font(.system(size: 12))
                                 .foregroundStyle(AppColors.textPrimary.opacity(0.4))
                         }

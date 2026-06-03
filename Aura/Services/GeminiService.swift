@@ -11,140 +11,166 @@ public enum FinancePeriod: String, CaseIterable, Equatable {
 /// Service for communicating with Google Gemini API
 final class GeminiService: ObservableObject {
     static let shared = GeminiService()
-    
-    // MARK: - Configuration
-    // Replace with your actual Gemini API key from https://aistudio.google.com/
-    private var apiKey: String {
-        UserDefaults.standard.string(forKey: "gemini_api_key") ?? ""
-    }
-    
-    private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
-    
-    private let systemPrompt = """
-    Ты — Friday, персональный AI-ассистент. Ты помогаешь пользователю с:
-    1. Управлением задачами — помогаешь планировать день, расставлять приоритеты
-    2. Финансами — даёшь советы по бюджету, анализируешь расходы
-    3. Общими вопросами — отвечаешь на любые вопросы
-    
-    Отвечай кратко, дружелюбно и по делу. Используй эмодзи для наглядности.
-    Язык общения — русский.
-    """
-    
-    @Published var isLoading = false
-    
-    // MARK: - Public Methods
-    
-    func sendMessage(_ message: String, period: FinancePeriod? = nil, context: [ChatMessage] = [], tasks: [TaskItem] = [], transactions: [Transaction] = []) async throws -> String {
-        guard !apiKey.isEmpty else {
-            return "⚠️ API ключ не настроен. Перейди в Настройки → введи свой Gemini API ключ.\n\nПолучить ключ: https://aistudio.google.com/"
+        
+        // MARK: - Configuration
+        // ВНИМАНИЕ: Для продакшена перенесите хранение ключа в Keychain!
+        private var apiKey: String {
+            UserDefaults.standard.string(forKey: "gemini_api_key") ?? ""
         }
         
-        let url = URL(string: "\(baseURL)?key=\(apiKey)")!
+        private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
         
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        private let systemPrompt = """
+        Ты — Friday, персональный AI-ассистент. Ты помогаешь пользователю с:
+        1. Управлением задачами — помогаешь планировать день, расставлять приоритеты.
+        2. Финансами — даёшь советы по бюджету, анализируешь расходы.
+        3. Общими вопросами — отвечаешь на любые вопросы.
         
-        // Build conversation history
-        var contents: [[String: Any]] = []
+        Отвечай кратко, дружелюбно и по делу. Используй эмодзи для наглядности.
+        Язык общения — русский.
+        """
         
-        // Add system instruction
-        var dynamicPrompt = systemPrompt
+        @Published var isLoading = false
         
-        let txForContext: [Transaction]
-        if let period = period {
-            txForContext = filter(transactions: transactions, by: period)
-        } else {
-            txForContext = transactions
-        }
+        // MARK: - Formatters (Optimized)
+        private static let shortDateFormatter: DateFormatter = {
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "ru_RU")
+            df.dateFormat = "dd.MM.yyyy"
+            return df
+        }()
         
-        if !tasks.isEmpty || !txForContext.isEmpty {
-            dynamicPrompt += "\n\nТекущий контекст пользователя:\n"
-            let pendingTasks = tasks.filter { !$0.isCompleted }
-            dynamicPrompt += "Незавершённых задач: \(pendingTasks.count). "
-            if !pendingTasks.isEmpty {
-                dynamicPrompt += "Некоторые из них: " + pendingTasks.prefix(3).map { $0.title }.joined(separator: ", ") + ".\n"
+        private static let timeDateFormatter: DateFormatter = {
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "ru_RU")
+            df.dateFormat = "d MMMM, HH:mm"
+            return df
+        }()
+        
+        // MARK: - Public Methods
+        
+        func sendMessage(
+            _ message: String,
+            period: FinancePeriod? = nil,
+            context: [ChatMessage] = [],
+            tasks: [TaskItem] = [],
+            transactions: [Transaction] = [],
+            calendarEvents: [CalendarEvent] = []
+        ) async throws -> String {
+            guard !apiKey.isEmpty else {
+                return "⚠️ API ключ не настроен. Перейди в Настройки → введи свой Gemini API ключ.\n\nПолучить ключ: https://aistudio.google.com/"
             }
-            if let period = period {
-                let income = txForContext.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-                let expense = txForContext.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
-                dynamicPrompt += "Финансы за период (\(period.rawValue)): доход: \(income) ₸, расход: \(expense) ₸.\n"
-                if !txForContext.isEmpty {
-                    dynamicPrompt += "Список транзакций (\(txForContext.count) шт.):\n"
-                    let df = DateFormatter(); df.locale = Locale(identifier: "ru_RU"); df.dateFormat = "dd.MM.yyyy"
-                    for tx in txForContext {
-                        let sign = tx.type == .income ? "+" : "-"
-                        let line = "- \(df.string(from: tx.date)) [\(tx.type.rawValue)] \(tx.title) — \(sign)\(Int(tx.amount)) ₸ (\(tx.category))"
+            
+            // Включаем индикатор загрузки и гарантируем его отключение при выходе
+            isLoading = true
+            defer { isLoading = false }
+            
+            let url = URL(string: "\(baseURL)?key=\(apiKey)")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            // 1. Формируем динамические системные инструкции (Контекст)
+            var dynamicPrompt = systemPrompt
+            
+            let txForContext: [Transaction] = period != nil ? filter(transactions: transactions, by: period!) : transactions
+            
+            if !tasks.isEmpty || !txForContext.isEmpty || !calendarEvents.isEmpty {
+                dynamicPrompt += "\n\nТЕКУЩИЙ КОНТЕКСТ ПОЛЬЗОВАТЕЛЯ:\n"
+                
+                // Задачи
+                let pendingTasks = tasks.filter { !$0.isCompleted }
+                dynamicPrompt += "Незавершённых задач: \(pendingTasks.count). "
+                if !pendingTasks.isEmpty {
+                    dynamicPrompt += "Приоритетные: " + pendingTasks.prefix(3).map { $0.title }.joined(separator: ", ") + ".\n"
+                }
+                
+                // Финансы
+                if let period = period {
+                    let income = txForContext.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+                    let expense = txForContext.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+                    dynamicPrompt += "Финансы за период (\(period.rawValue)): доход: \(Int(income)) ₸, расход: \(Int(expense)) ₸.\n"
+                    
+                    if !txForContext.isEmpty {
+                        // Ограничиваем список транзакций, чтобы не превысить лимит токенов API
+                        let limitedTx = txForContext.prefix(50)
+                        dynamicPrompt += "Последние транзакции (\(limitedTx.count) шт.):\n"
+                        for tx in limitedTx {
+                            let sign = tx.type == .income ? "+" : "-"
+                            let line = "- \(Self.shortDateFormatter.string(from: tx.date)) [\(tx.type.rawValue)] \(tx.title) — \(sign)\(Int(tx.amount)) ₸ (\(tx.category))"
+                            dynamicPrompt += line + "\n"
+                        }
+                    }
+                }
+                
+                // Календарь
+                if !calendarEvents.isEmpty {
+                    dynamicPrompt += "\nПредстоящие события (\(calendarEvents.count) шт.):\n"
+                    for event in calendarEvents {
+                        let timeStr = event.isAllDay ? "весь день" : Self.timeDateFormatter.string(from: event.startDate)
+                        var line = "- \(timeStr): \(event.title)"
+                        if let loc = event.location, !loc.isEmpty { line += " [\(loc)]" }
                         dynamicPrompt += line + "\n"
                     }
                 }
-            } else {
-                let monthTransactions = transactions.filter { Calendar.current.isDate($0.date, equalTo: Date(), toGranularity: .month) }
-                let monthIncome = monthTransactions.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-                let monthExpense = monthTransactions.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
-                dynamicPrompt += "В этом месяце доход: \(monthIncome) ₸, расход: \(monthExpense) ₸."
             }
-        }
-        
-        let systemInstruction: [String: Any] = [
-            "role": "user",
-            "parts": [["text": dynamicPrompt]]
-        ]
-        contents.append(systemInstruction)
-        contents.append([
-            "role": "model",
-            "parts": [["text": "Привет! Я Friday, твой персональный ассистент 🌟 Чем могу помочь?"]]
-        ])
-        
-        // Add recent context (last 10 messages)
-        let recentContext = context.suffix(10)
-        for msg in recentContext {
+            
+            // 2. Собираем историю диалога
+            var contents: [[String: Any]] = []
+            let recentContext = context.suffix(10) // Ограничиваем историю 10 сообщениями
+            
+            for msg in recentContext {
+                contents.append([
+                    "role": msg.isFromUser ? "user" : "model",
+                    "parts": [["text": msg.content]]
+                ])
+            }
+            
+            // Добавляем текущее сообщение пользователя
             contents.append([
-                "role": msg.isFromUser ? "user" : "model",
-                "parts": [["text": msg.content]]
+                "role": "user",
+                "parts": [["text": message]]
             ])
-        }
-        
-        // Add current message
-        contents.append([
-            "role": "user",
-            "parts": [["text": message]]
-        ])
-        
-        let body: [String: Any] = [
-            "contents": contents,
-            "generationConfig": [
-                "temperature": 0.7,
-                "topP": 0.95,
-                "topK": 40,
-                "maxOutputTokens": 1024
+            
+            // 3. Формируем итоговый JSON (используем нативный systemInstruction)
+            let body: [String: Any] = [
+                "systemInstruction": [
+                    "parts": [["text": dynamicPrompt]]
+                ],
+                "contents": contents,
+                "generationConfig": [
+                    "temperature": 0.7,
+                    "topP": 0.95,
+                    "topK": 40,
+                    "maxOutputTokens": 1024
+                ]
             ]
-        ]
-        
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GeminiError.invalidResponse
+            
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            
+            // 4. Выполняем сетевой запрос
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw GeminiError.invalidResponse
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+                throw GeminiError.apiError("Status \(httpResponse.statusCode): \(errorBody)")
+            }
+            
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let candidates = json["candidates"] as? [[String: Any]],
+                  let firstCandidate = candidates.first,
+                  let content = firstCandidate["content"] as? [String: Any],
+                  let parts = content["parts"] as? [[String: Any]],
+                  let text = parts.first?["text"] as? String else {
+                throw GeminiError.parsingError
+            }
+            
+            return text
         }
-        
-        guard httpResponse.statusCode == 200 else {
-            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw GeminiError.apiError("Status \(httpResponse.statusCode): \(errorBody)")
-        }
-        
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let candidates = json["candidates"] as? [[String: Any]],
-              let firstCandidate = candidates.first,
-              let content = firstCandidate["content"] as? [String: Any],
-              let parts = content["parts"] as? [[String: Any]],
-              let text = parts.first?["text"] as? String else {
-            throw GeminiError.parsingError
-        }
-        
-        return text
-    }
     
     /// Generate daily summary using AI
     func generateDailySummary(tasks: [TaskItem], transactions: [Transaction]) async throws -> String {

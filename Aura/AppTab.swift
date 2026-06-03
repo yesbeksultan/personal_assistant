@@ -8,6 +8,7 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
     case tasks    = "tasks"
     case chat     = "chat"
     case finance  = "finance"
+    case calendar = "calendar"
     case markdown = "markdown"
     case notes    = "notes"
 
@@ -18,6 +19,7 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
         case .tasks:    return "Задачи"
         case .chat:     return "Friday AI"
         case .finance:  return "Финансы"
+        case .calendar: return "Календарь"
         case .markdown: return "Markdown"
         case .notes:    return "Заметки"
         }
@@ -28,6 +30,7 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
         case .tasks:    return "checkmark.circle"
         case .chat:     return "sparkles"
         case .finance:  return "creditcard"
+        case .calendar: return "calendar"
         case .markdown: return "doc.richtext"
         case .notes:    return "note.text"
         }
@@ -38,6 +41,7 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
         case .tasks:    return Color(hex: "667eea")
         case .chat:     return Color(hex: "f093fb")
         case .finance:  return Color(hex: "4facfe")
+        case .calendar: return Color(hex: "5ee7df")
         case .markdown: return Color(hex: "43e97b")
         case .notes:    return Color(hex: "fa709a")
         }
@@ -49,6 +53,7 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
         case .tasks:    TasksView()
         case .chat:     ChatView()
         case .finance:  FinanceView()
+        case .calendar: CalendarView()
         case .markdown: MarkdownListView()
         case .notes:    NotesView()
         }

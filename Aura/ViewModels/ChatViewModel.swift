@@ -3,16 +3,25 @@ import SwiftData
 import SwiftUI
 
 enum ChatFunction: String, CaseIterable, Identifiable {
-    case finance = "Финансы"
+    case finance  = "Финансы"
+    case calendar = "Календарь"
     var id: String { rawValue }
     var icon: String {
         switch self {
-        case .finance: return "chart.bar.fill"
+        case .finance:  return "chart.bar.fill"
+        case .calendar: return "calendar"
         }
     }
     var emoji: String {
         switch self {
-        case .finance: return "💰"
+        case .finance:  return "💰"
+        case .calendar: return "📅"
+        }
+    }
+    var description: String {
+        switch self {
+        case .finance:  return "Передаёт список транзакций"
+        case .calendar: return "Передаёт события календаря"
         }
     }
 }
@@ -31,7 +40,7 @@ class ChatViewModel {
     private let geminiService = GeminiService.shared
     
     @MainActor
-    func sendMessage(context: ModelContext, messages: [ChatMessage], tasks: [TaskItem] = [], transactions: [Transaction] = []) async {
+    func sendMessage(context: ModelContext, messages: [ChatMessage], tasks: [TaskItem] = [], transactions: [Transaction] = [], events: [CalendarEvent] = []) async {
         let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         
@@ -49,7 +58,8 @@ class ChatViewModel {
         
         do {
             let period = (activeFunction == .finance) ? selectedPeriod : nil
-            let response = try await geminiService.sendMessage(text, period: period, context: messages, tasks: tasks, transactions: transactions)
+            let calEvents = (activeFunction == .calendar) ? events : []
+            let response = try await geminiService.sendMessage(text, period: period, context: messages, tasks: tasks, transactions: transactions, calendarEvents: calEvents)
             let aiMessage = ChatMessage(content: response, isFromUser: false, session: session)
             context.insert(aiMessage)
         } catch {
