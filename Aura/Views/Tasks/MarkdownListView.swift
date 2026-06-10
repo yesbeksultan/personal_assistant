@@ -27,6 +27,8 @@ struct MarkdownListView: View {
     @State private var isLoading = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var metadataQuery: NSMetadataQuery?
+    private let iCloud = iCloudService.shared
 
     // Переименование
     @State private var renamingURL: URL? = nil
@@ -105,7 +107,11 @@ struct MarkdownListView: View {
                 }
             }
             .refreshable { loadFiles() }
-            .onAppear { loadFiles() }
+            .onAppear {
+                startMetadataQuery()
+                loadFiles()
+            }
+            .onDisappear { stopMetadataQuery() }
             .alert("Ошибка", isPresented: $showError) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -131,16 +137,45 @@ struct MarkdownListView: View {
     // MARK: - File System
 
     private func documentsDirectory() -> URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        // iCloud Documents если доступно, иначе локальная папка
+        iCloud.containerURL(subpath: "Markdown")
+    }
+
+    // MARK: - iCloud Metadata Query
+
+    private func startMetadataQuery() {
+        guard iCloud.isAvailable else { return }
+        let query = NSMetadataQuery()
+        query.searchScopes = [NSMetadataQueryUbiquitousDocumentsScope]
+        query.predicate = NSPredicate(format: "%K LIKE '*.md'", NSMetadataItemFSNameKey)
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidUpdate,
+            object: query,
+            queue: .main
+        ) { _ in loadFiles() }
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidFinishGathering,
+            object: query,
+            queue: .main
+        ) { _ in loadFiles() }
+        query.start()
+        metadataQuery = query
+    }
+
+    private func stopMetadataQuery() {
+        metadataQuery?.stop()
+        metadataQuery = nil
     }
 
     private func loadFiles() {
         isLoading = true
         defer { isLoading = false }
+        let dir = documentsDirectory()
+        iCloud.startDownloadIfNeeded(at: dir)
         do {
             let urls = try FileManager.default.contentsOfDirectory(
-                at: documentsDirectory(),
-                includingPropertiesForKeys: nil
+                at: dir,
+                includingPropertiesForKeys: [.ubiquitousItemDownloadingStatusKey]
             )
             self.files = urls
                 .filter { $0.pathExtension.lowercased() == "md" }
@@ -162,23 +197,40 @@ struct MarkdownListView: View {
                 .appendingPathExtension("md")
             idx += 1
         }
-        do {
-            try "# Новый документ\n\nНапишите здесь...".data(using: .utf8)?.write(to: url)
-            loadFiles()
-        } catch {
-            self.errorMessage = error.localizedDescription
+        let coordinator = NSFileCoordinator()
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordError) { writeURL in
+            do {
+                try "# Новый документ\n\nНапишите здесь...".data(using: .utf8)?.write(to: writeURL)
+                iCloudService.shared.markSynced()
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.showError = true
+            }
+        }
+        if let err = coordError {
+            self.errorMessage = err.localizedDescription
             self.showError = true
         }
+        loadFiles()
     }
 
     private func deleteFile(url: URL) {
-        do {
-            try FileManager.default.removeItem(at: url)
-            loadFiles()
-        } catch {
-            self.errorMessage = error.localizedDescription
+        let coordinator = NSFileCoordinator()
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forDeleting, error: &coordError) { deleteURL in
+            do {
+                try FileManager.default.removeItem(at: deleteURL)
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.showError = true
+            }
+        }
+        if let err = coordError {
+            self.errorMessage = err.localizedDescription
             self.showError = true
         }
+        loadFiles()
     }
 
     private func rename(url: URL, to newName: String) {
@@ -191,13 +243,23 @@ struct MarkdownListView: View {
 
         guard newURL != url else { return }
 
-        do {
-            try FileManager.default.moveItem(at: url, to: newURL)
-            loadFiles()
-        } catch {
-            self.errorMessage = error.localizedDescription
+        let coordinator = NSFileCoordinator()
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forMoving,
+                               writingItemAt: newURL, options: .forReplacing,
+                               error: &coordError) { srcURL, dstURL in
+            do {
+                try FileManager.default.moveItem(at: srcURL, to: dstURL)
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.showError = true
+            }
+        }
+        if let err = coordError {
+            self.errorMessage = err.localizedDescription
             self.showError = true
         }
+        loadFiles()
     }
 }
 

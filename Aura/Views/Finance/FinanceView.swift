@@ -11,6 +11,7 @@ struct FinanceView: View {
     @State private var isSensitiveUnlocked: Bool = false
     @State private var authError: String? = nil
     @State private var showManageCategories = false
+    private let syncService = iCloudDataSyncService.shared
     
     var body: some View {
         NavigationStack {
@@ -73,6 +74,10 @@ struct FinanceView: View {
             }
             .onAppear {
                 isSensitiveUnlocked = false
+            }
+            .onChange(of: transactions.count) { exportToiCloud() }
+            .onReceive(NotificationCenter.default.publisher(for: .iCloudDataDidDownload)) { notification in
+                importTransactionsFromiCloud(notification.object as? SyncPayload)
             }
         }
     }
@@ -278,6 +283,34 @@ struct FinanceView: View {
                 self.authError = error?.localizedDescription ?? "Face ID/Touch ID недоступен"
             }
         }
+    }
+
+    // MARK: - iCloud Sync Helpers
+
+    private func exportToiCloud() {
+        let descriptor = FetchDescriptor<TaskItem>()
+        let allTasks = (try? modelContext.fetch(descriptor)) ?? []
+        syncService.exportToiCloud(tasks: allTasks, transactions: transactions)
+    }
+
+    private func importTransactionsFromiCloud(_ payload: SyncPayload?) {
+        guard let payload else { return }
+        let existingIDs = Set(transactions.map { $0.id })
+
+        for dto in payload.transactions {
+            guard !existingIDs.contains(dto.id) else { continue }
+            let tx = Transaction(
+                title: dto.title,
+                amount: dto.amount,
+                type: TransactionType(rawValue: dto.type) ?? .expense,
+                category: dto.category,
+                date: dto.date,
+                note: dto.note
+            )
+            tx.id = dto.id
+            modelContext.insert(tx)
+        }
+        try? modelContext.save()
     }
 }
 

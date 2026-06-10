@@ -10,6 +10,8 @@ struct NotesView: View {
     @State private var errorMessage = ""
     @State private var renamingURL: URL? = nil
     @State private var renameText = ""
+    @State private var metadataQuery: NSMetadataQuery?
+    private let iCloud = iCloudService.shared
 
     var body: some View {
         NavigationStack {
@@ -30,7 +32,11 @@ struct NotesView: View {
                 }
             }
             .refreshable { loadNotes() }
-            .onAppear { loadNotes() }
+            .onAppear {
+                startMetadataQuery()
+                loadNotes()
+            }
+            .onDisappear { stopMetadataQuery() }
             .alert("Ошибка", isPresented: $showError) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -132,19 +138,46 @@ struct NotesView: View {
     // MARK: - File System
 
     private func notesDirectory() -> URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let dir = docs.appendingPathComponent("FridayNotes", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+        // Используем iCloud Documents если доступно
+        iCloud.containerURL(subpath: "FridayNotes")
+    }
+
+    // MARK: - iCloud Metadata Query
+
+    private func startMetadataQuery() {
+        guard iCloud.isAvailable else { return }
+        let query = NSMetadataQuery()
+        query.searchScopes = [NSMetadataQueryUbiquitousDocumentsScope]
+        query.predicate = NSPredicate(format: "%K LIKE '*.txt'", NSMetadataItemFSNameKey)
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidUpdate,
+            object: query,
+            queue: .main
+        ) { _ in loadNotes() }
+        NotificationCenter.default.addObserver(
+            forName: .NSMetadataQueryDidFinishGathering,
+            object: query,
+            queue: .main
+        ) { _ in loadNotes() }
+        query.start()
+        metadataQuery = query
+    }
+
+    private func stopMetadataQuery() {
+        metadataQuery?.stop()
+        metadataQuery = nil
     }
 
     private func loadNotes() {
         isLoading = true
         defer { isLoading = false }
+        let dir = notesDirectory()
+        // Загружаем файлы из iCloud если они ещё не скачаны
+        iCloud.startDownloadIfNeeded(at: dir)
         do {
             let urls = try FileManager.default.contentsOfDirectory(
-                at: notesDirectory(),
-                includingPropertiesForKeys: [.contentModificationDateKey],
+                at: dir,
+                includingPropertiesForKeys: [.contentModificationDateKey, .ubiquitousItemDownloadingStatusKey],
                 options: .skipsHiddenFiles
             )
             self.notes = urls
@@ -171,23 +204,40 @@ struct NotesView: View {
                 .appendingPathExtension("txt")
             idx += 1
         }
-        do {
-            try "".data(using: .utf8)?.write(to: url)
-            loadNotes()
-        } catch {
-            self.errorMessage = error.localizedDescription
+        let coordinator = NSFileCoordinator()
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordError) { writeURL in
+            do {
+                try "".data(using: .utf8)?.write(to: writeURL)
+                iCloudService.shared.markSynced()
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.showError = true
+            }
+        }
+        if let err = coordError {
+            self.errorMessage = err.localizedDescription
             self.showError = true
         }
+        loadNotes()
     }
 
     private func deleteNote(url: URL) {
-        do {
-            try FileManager.default.removeItem(at: url)
-            loadNotes()
-        } catch {
-            self.errorMessage = error.localizedDescription
+        let coordinator = NSFileCoordinator()
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forDeleting, error: &coordError) { deleteURL in
+            do {
+                try FileManager.default.removeItem(at: deleteURL)
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.showError = true
+            }
+        }
+        if let err = coordError {
+            self.errorMessage = err.localizedDescription
             self.showError = true
         }
+        loadNotes()
     }
 
     private func rename(url: URL, to newName: String) {
@@ -197,13 +247,23 @@ struct NotesView: View {
             .appendingPathComponent(trimmed)
             .appendingPathExtension("txt")
         guard newURL != url else { return }
-        do {
-            try FileManager.default.moveItem(at: url, to: newURL)
-            loadNotes()
-        } catch {
-            self.errorMessage = error.localizedDescription
+        let coordinator = NSFileCoordinator()
+        var coordError: NSError?
+        coordinator.coordinate(writingItemAt: url, options: .forMoving,
+                               writingItemAt: newURL, options: .forReplacing,
+                               error: &coordError) { srcURL, dstURL in
+            do {
+                try FileManager.default.moveItem(at: srcURL, to: dstURL)
+            } catch {
+                self.errorMessage = error.localizedDescription
+                self.showError = true
+            }
+        }
+        if let err = coordError {
+            self.errorMessage = err.localizedDescription
             self.showError = true
         }
+        loadNotes()
     }
 }
 

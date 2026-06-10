@@ -7,6 +7,7 @@ struct TasksView: View {
     @State private var viewModel = TaskViewModel()
     @State private var showAddTask = false
     @State private var editingTask: TaskItem?
+    private let syncService = iCloudDataSyncService.shared
     
     var body: some View {
         NavigationStack {
@@ -47,6 +48,11 @@ struct TasksView: View {
             .searchable(text: $viewModel.searchText, prompt: "Поиск задач...")
             .sheet(isPresented: $showAddTask) { AddTaskView() }
             .sheet(item: $editingTask) { task in AddTaskView(editingTask: task) }
+            .onChange(of: tasks.count) { exportToiCloud() }
+            .onChange(of: tasks.map { $0.isCompleted }) { exportToiCloud() }
+            .onReceive(NotificationCenter.default.publisher(for: .iCloudDataDidDownload)) { notification in
+                importFromiCloud(notification.object as? SyncPayload)
+            }
         }
     }
     
@@ -88,6 +94,43 @@ struct TasksView: View {
             }
             .padding(.bottom, 100)
         }
+    }
+
+    // MARK: - iCloud Sync Helpers
+
+    private func exportToiCloud() {
+        // Fetch all transactions to include in combined payload
+        let descriptor = FetchDescriptor<Transaction>()
+        let allTransactions = (try? modelContext.fetch(descriptor)) ?? []
+        syncService.exportToiCloud(tasks: tasks, transactions: allTransactions)
+    }
+
+    private func importFromiCloud(_ payload: SyncPayload?) {
+        guard let payload else { return }
+
+        let existingIDs = Set(tasks.map { $0.id })
+
+        for dto in payload.tasks {
+            if let existing = tasks.first(where: { $0.id == dto.id }) {
+                // Update existing task only if remote is newer (by checking createdAt as proxy)
+                dto.apply(to: existing)
+            } else if !existingIDs.contains(dto.id) {
+                // Insert new task from another device
+                let newTask = TaskItem(
+                    title: dto.title,
+                    taskDescription: dto.taskDescription,
+                    category: dto.category,
+                    priority: TaskPriority(rawValue: dto.priority) ?? .medium,
+                    isCompleted: dto.isCompleted,
+                    dueDate: dto.dueDate
+                )
+                newTask.id = dto.id
+                newTask.createdAt = dto.createdAt
+                modelContext.insert(newTask)
+            }
+        }
+
+        try? modelContext.save()
     }
 }
 

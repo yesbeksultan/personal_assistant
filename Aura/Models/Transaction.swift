@@ -55,49 +55,100 @@ let incomeCategories = [
 @Observable
 final class FinanceCategoryStore {
     static let shared = FinanceCategoryStore()
-    
+
+    private let kvStore = NSUbiquitousKeyValueStore.default
+    private let expenseKey = "customExpenseCategories"
+    private let incomeKey  = "customIncomeCategories"
+    private let suggestKey = "customCategorySuggestions"
+
     var customExpenseCategories: [String] = []
     var customIncomeCategories: [String] = []
     var customSuggestions: [String: [String]] = [:]
-    
+
     private init() {
-        if let savedExpenses = UserDefaults.standard.stringArray(forKey: "customExpenseCategories") {
-            self.customExpenseCategories = savedExpenses
-        }
-        if let savedIncomes = UserDefaults.standard.stringArray(forKey: "customIncomeCategories") {
-            self.customIncomeCategories = savedIncomes
-        }
-        if let savedSuggestions = UserDefaults.standard.dictionary(forKey: "customCategorySuggestions") as? [String: [String]] {
-            self.customSuggestions = savedSuggestions
+        loadFromStore()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(kvStoreChanged),
+            name: .iCloudKVStoreDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func kvStoreChanged() {
+        DispatchQueue.main.async { [weak self] in
+            self?.loadFromStore()
         }
     }
-    
+
+    private func loadFromStore() {
+        // iCloud KV Store сначала, фолбек на UserDefaults
+        if let expenses = kvStore.array(forKey: expenseKey) as? [String] {
+            customExpenseCategories = expenses
+        } else if let saved = UserDefaults.standard.stringArray(forKey: expenseKey) {
+            customExpenseCategories = saved
+        }
+
+        if let incomes = kvStore.array(forKey: incomeKey) as? [String] {
+            customIncomeCategories = incomes
+        } else if let saved = UserDefaults.standard.stringArray(forKey: incomeKey) {
+            customIncomeCategories = saved
+        }
+
+        if let suggestions = kvStore.dictionary(forKey: suggestKey) as? [String: [String]] {
+            customSuggestions = suggestions
+        } else if let saved = UserDefaults.standard.dictionary(forKey: suggestKey) as? [String: [String]] {
+            customSuggestions = saved
+        }
+    }
+
+    private func persistExpenses() {
+        kvStore.set(customExpenseCategories, forKey: expenseKey)
+        UserDefaults.standard.set(customExpenseCategories, forKey: expenseKey)
+        kvStore.synchronize()
+        iCloudService.shared.markSynced()
+    }
+
+    private func persistIncomes() {
+        kvStore.set(customIncomeCategories, forKey: incomeKey)
+        UserDefaults.standard.set(customIncomeCategories, forKey: incomeKey)
+        kvStore.synchronize()
+        iCloudService.shared.markSynced()
+    }
+
+    private func persistSuggestions() {
+        kvStore.set(customSuggestions, forKey: suggestKey)
+        UserDefaults.standard.set(customSuggestions, forKey: suggestKey)
+        kvStore.synchronize()
+    }
+
     func addCategory(_ category: String, type: TransactionType, suggestions: [String] = []) {
         let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        
+
         if type == .expense {
             if !expenseCategories.contains(trimmed) && !customExpenseCategories.contains(trimmed) {
                 customExpenseCategories.append(trimmed)
-                UserDefaults.standard.set(customExpenseCategories, forKey: "customExpenseCategories")
+                persistExpenses()
             }
         } else {
             if !incomeCategories.contains(trimmed) && !customIncomeCategories.contains(trimmed) {
                 customIncomeCategories.append(trimmed)
-                UserDefaults.standard.set(customIncomeCategories, forKey: "customIncomeCategories")
+                persistIncomes()
             }
         }
-        
+
         if !suggestions.isEmpty {
             customSuggestions[trimmed] = suggestions.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-            UserDefaults.standard.set(customSuggestions, forKey: "customCategorySuggestions")
+            persistSuggestions()
         }
     }
-    
+
     func suggestions(for category: String) -> [String]? {
         customSuggestions[category]
     }
-    
+
     func allCategories(for type: TransactionType) -> [String] {
         if type == .expense {
             return expenseCategories + customExpenseCategories

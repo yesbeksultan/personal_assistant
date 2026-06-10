@@ -78,12 +78,41 @@ class TabPreferences: ObservableObject {
     }
 
     private init() {
-        if let data = UserDefaults.standard.data(forKey: "mainTabIDs"),
-           let ids = try? JSONDecoder().decode([String].self, from: data) {
-            mainTabs = ids.compactMap { AppTab(rawValue: $0) }
-        } else {
-            mainTabs = defaultIDs.compactMap { AppTab(rawValue: $0) }
+        mainTabs = Self.loadTabs(key: key, defaults: defaultIDs)
+
+        // Наблюдаем изменения с других устройств
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(kvStoreDidChange),
+            name: .iCloudKVStoreDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func kvStoreDidChange() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let freshTabs = Self.loadTabs(key: self.key, defaults: self.defaultIDs)
+            if freshTabs != self.mainTabs {
+                self.mainTabs = freshTabs
+            }
         }
+    }
+
+    private static func loadTabs(key: String, defaults: [String]) -> [AppTab] {
+        // Сначала пробуем iCloud KV Store
+        let kvStore = NSUbiquitousKeyValueStore.default
+        if let ids = kvStore.array(forKey: key) as? [String], !ids.isEmpty {
+            let tabs = ids.compactMap { AppTab(rawValue: $0) }
+            if !tabs.isEmpty { return tabs }
+        }
+        // Фолбек на UserDefaults (миграция старых данных)
+        if let data = UserDefaults.standard.data(forKey: key),
+           let ids = try? JSONDecoder().decode([String].self, from: data) {
+            let tabs = ids.compactMap { AppTab(rawValue: $0) }
+            if !tabs.isEmpty { return tabs }
+        }
+        return defaults.compactMap { AppTab(rawValue: $0) }
     }
 
     func isInMain(_ tab: AppTab) -> Bool { mainTabs.contains(tab) }
@@ -104,8 +133,12 @@ class TabPreferences: ObservableObject {
 
     private func save() {
         let ids = mainTabs.map(\.rawValue)
-        if let data = try? JSONEncoder().encode(ids) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
+        // Сохраняем в iCloud KV Store (синхронизируется на все устройства)
+        let kvStore = NSUbiquitousKeyValueStore.default
+        kvStore.set(ids, forKey: key)
+        kvStore.synchronize()
+        // Также в UserDefaults как резервная копия
+        UserDefaults.standard.set(try? JSONEncoder().encode(ids), forKey: key)
+        iCloudService.shared.markSynced()
     }
 }

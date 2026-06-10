@@ -13,7 +13,7 @@ struct fridayApp: App {
     init() {
         // Register default notification settings
         NotificationDefaults.registerDefaults()
-        
+
         // Setup notification delegate and request permissions / reschedule
         NotificationService.shared.setupNotificationDelegate()
         NotificationService.shared.requestPermission { granted in
@@ -21,12 +21,33 @@ struct fridayApp: App {
                 NotificationService.shared.rescheduleAll()
             }
         }
+
+        // Start iCloud status check & KV store sync
+        _ = iCloudService.shared
     }
-    
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .onAppear {
+                    // Auto-sync data from iCloud on launch
+                    iCloudDataSyncService.shared.syncOnLaunch()
+                }
         }
-        .modelContainer(for: [TaskItem.self, Transaction.self, ChatMessage.self, ChatSession.self])
+        .modelContainer(sharedModelContainer)
     }
 }
+
+// MARK: - Local SwiftData container (free account compatible)
+
+private let sharedModelContainer: ModelContainer = {
+    let schema = Schema([
+        TaskItem.self,
+        Transaction.self,
+        ChatMessage.self,
+        ChatSession.self
+    ])
+    let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+    return try! ModelContainer(for: schema, configurations: [config])
+}()
+

@@ -185,6 +185,11 @@ struct SettingsView: View {
                             }
                         }
 
+                        // MARK: — iCloud Sync
+                        SettingsSection(icon: "icloud.fill", title: "iCloud Синхронизация", gradient: [Color(hex: "4facfe"), Color(hex: "00f2fe")]) {
+                            iCloudSyncView()
+                        }
+
                         // MARK: — Theme
                         SettingsSection(icon: "paintpalette.fill", title: "Внешний вид", gradient: AppGradients.blue) {
                             Picker("Тема", selection: $appTheme) {
