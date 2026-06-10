@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import LocalAuthentication
+import UniformTypeIdentifiers
 
 struct FinanceView: View {
     @Query(sort: \Transaction.date, order: .reverse) private var transactions: [Transaction]
@@ -12,6 +13,15 @@ struct FinanceView: View {
     @State private var authError: String? = nil
     @State private var showManageCategories = false
     private let syncService = iCloudDataSyncService.shared
+    
+    // Import/Export State
+    @State private var showJSONExporter = false
+    @State private var showCSVExporter = false
+    @State private var showFileImporter = false
+    @State private var jsonExportDocument: FinanceJSONDocument? = nil
+    @State private var csvExportDocument: FinanceCSVDocument? = nil
+    @State private var importResultAlert: String? = nil
+    @State private var showImportResult = false
     
     var body: some View {
         NavigationStack {
@@ -33,8 +43,34 @@ struct FinanceView: View {
             .navigationTitle("Финансы")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showManageCategories = true } label: {
-                        Image(systemName: "tag")
+                    Menu {
+                        Button {
+                            showManageCategories = true
+                        } label: {
+                            Label("Категории", systemImage: "tag")
+                        }
+                        
+                        Divider()
+                        
+                        Button {
+                            exportJSON()
+                        } label: {
+                            Label("Экспорт в JSON", systemImage: "arrow.down.doc")
+                        }
+                        
+                        Button {
+                            exportCSV()
+                        } label: {
+                            Label("Экспорт в CSV", systemImage: "tablecells")
+                        }
+                        
+                        Button {
+                            showFileImporter = true
+                        } label: {
+                            Label("Импорт из JSON", systemImage: "arrow.up.doc")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                             .font(.system(size: 17, weight: .regular))
                             .foregroundStyle(AppColors.textPrimary.opacity(0.65))
                     }
@@ -78,6 +114,58 @@ struct FinanceView: View {
             .onChange(of: transactions.count) { exportToiCloud() }
             .onReceive(NotificationCenter.default.publisher(for: .iCloudDataDidDownload)) { notification in
                 importTransactionsFromiCloud(notification.object as? SyncPayload)
+            }
+            .fileExporter(
+                isPresented: $showJSONExporter,
+                document: jsonExportDocument,
+                contentType: .json,
+                defaultFilename: "aura_finances_backup"
+            ) { result in
+                switch result {
+                case .success:
+                    importResultAlert = "Данные успешно экспортированы в JSON!"
+                    showImportResult = true
+                case .failure(let error):
+                    importResultAlert = "Ошибка экспорта JSON: \(error.localizedDescription)"
+                    showImportResult = true
+                }
+            }
+            .fileExporter(
+                isPresented: $showCSVExporter,
+                document: csvExportDocument,
+                contentType: .commaSeparatedText,
+                defaultFilename: "aura_finances"
+            ) { result in
+                switch result {
+                case .success:
+                    importResultAlert = "Данные успешно экспортированы в CSV!"
+                    showImportResult = true
+                case .failure(let error):
+                    importResultAlert = "Ошибка экспорта CSV: \(error.localizedDescription)"
+                    showImportResult = true
+                }
+            }
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    performImport(from: url)
+                case .failure(let error):
+                    importResultAlert = "Ошибка выбора файла: \(error.localizedDescription)"
+                    showImportResult = true
+                }
+            }
+            .alert(
+                "Импорт / Экспорт",
+                isPresented: $showImportResult
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importResultAlert ?? "")
             }
         }
     }
@@ -311,6 +399,67 @@ struct FinanceView: View {
             modelContext.insert(tx)
         }
         try? modelContext.save()
+    }
+    
+    // MARK: - Manual Import/Export Helpers
+    
+    private func exportJSON() {
+        do {
+            let data = try FinanceImportExportService.shared.exportToJSON(transactions: transactions)
+            jsonExportDocument = FinanceJSONDocument(data: data)
+            showJSONExporter = true
+        } catch {
+            importResultAlert = "Ошибка подготовки JSON: \(error.localizedDescription)"
+            showImportResult = true
+        }
+    }
+    
+    private func exportCSV() {
+        let csvText = FinanceImportExportService.shared.exportToCSV(transactions: transactions)
+        csvExportDocument = FinanceCSVDocument(text: csvText)
+        showCSVExporter = true
+    }
+    
+    private func performImport(from url: URL) {
+        guard url.startAccessingSecurityScopedResource() else {
+            importResultAlert = "Нет прав доступа к выбранному файлу."
+            showImportResult = true
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            let dtos = try FinanceImportExportService.shared.importFromJSON(data: data)
+            let existingIDs = Set(transactions.map { $0.id })
+            var importCount = 0
+            
+            for dto in dtos {
+                guard !existingIDs.contains(dto.id) else { continue }
+                let tx = Transaction(
+                    title: dto.title,
+                    amount: dto.amount,
+                    type: TransactionType(rawValue: dto.type) ?? .expense,
+                    category: dto.category,
+                    date: dto.date,
+                    note: dto.note
+                )
+                tx.id = dto.id
+                modelContext.insert(tx)
+                importCount += 1
+            }
+            
+            if importCount > 0 {
+                try modelContext.save()
+                exportToiCloud() // Sync to iCloud
+            }
+            
+            importResultAlert = "Импорт завершен успешно! Добавлено \(importCount) транзакций."
+            showImportResult = true
+        } catch {
+            importResultAlert = "Ошибка импорта: \(error.localizedDescription)"
+            showImportResult = true
+        }
     }
 }
 
