@@ -17,9 +17,10 @@ struct FinanceView: View {
     // Import/Export State
     @State private var showJSONExporter = false
     @State private var showCSVExporter = false
-    @State private var showFileImporter = false
-    @State private var jsonExportDocument: FinanceJSONDocument? = nil
-    @State private var csvExportDocument: FinanceCSVDocument? = nil
+    @State private var showJSONImporter = false
+    @State private var showCSVImporter = false
+    @State private var jsonExportDocument = FinanceJSONDocument(data: Data())
+    @State private var csvExportDocument = FinanceCSVDocument(text: "")
     @State private var importResultAlert: String? = nil
     @State private var showImportResult = false
     
@@ -65,9 +66,15 @@ struct FinanceView: View {
                         }
                         
                         Button {
-                            showFileImporter = true
+                            showJSONImporter = true
                         } label: {
                             Label("Импорт из JSON", systemImage: "arrow.up.doc")
+                        }
+                        
+                        Button {
+                            showCSVImporter = true
+                        } label: {
+                            Label("Импорт из CSV (Excel)", systemImage: "tablecells.badge.ellipsis")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -115,57 +122,86 @@ struct FinanceView: View {
             .onReceive(NotificationCenter.default.publisher(for: .iCloudDataDidDownload)) { notification in
                 importTransactionsFromiCloud(notification.object as? SyncPayload)
             }
-            .fileExporter(
-                isPresented: $showJSONExporter,
-                document: jsonExportDocument,
-                contentType: .json,
-                defaultFilename: "aura_finances_backup"
-            ) { result in
-                switch result {
-                case .success:
-                    importResultAlert = "Данные успешно экспортированы в JSON!"
-                    showImportResult = true
-                case .failure(let error):
-                    importResultAlert = "Ошибка экспорта JSON: \(error.localizedDescription)"
-                    showImportResult = true
-                }
+            .background {
+                Color.clear
+                    .fileExporter(
+                        isPresented: $showJSONExporter,
+                        document: jsonExportDocument,
+                        contentType: .json,
+                        defaultFilename: "aura_finances_backup"
+                    ) { result in
+                        switch result {
+                        case .success:
+                            importResultAlert = "Данные успешно экспортированы в JSON!"
+                            showImportResult = true
+                        case .failure(let error):
+                            importResultAlert = "Ошибка экспорта JSON: \(error.localizedDescription)"
+                            showImportResult = true
+                        }
+                    }
             }
-            .fileExporter(
-                isPresented: $showCSVExporter,
-                document: csvExportDocument,
-                contentType: .commaSeparatedText,
-                defaultFilename: "aura_finances"
-            ) { result in
-                switch result {
-                case .success:
-                    importResultAlert = "Данные успешно экспортированы в CSV!"
-                    showImportResult = true
-                case .failure(let error):
-                    importResultAlert = "Ошибка экспорта CSV: \(error.localizedDescription)"
-                    showImportResult = true
-                }
+            .background {
+                Color.clear
+                    .fileExporter(
+                        isPresented: $showCSVExporter,
+                        document: csvExportDocument,
+                        contentType: .commaSeparatedText,
+                        defaultFilename: "aura_finances"
+                    ) { result in
+                        switch result {
+                        case .success:
+                            importResultAlert = "Данные успешно экспортированы в CSV!"
+                            showImportResult = true
+                        case .failure(let error):
+                            importResultAlert = "Ошибка экспорта CSV: \(error.localizedDescription)"
+                            showImportResult = true
+                        }
+                    }
             }
-            .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.json],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    guard let url = urls.first else { return }
-                    performImport(from: url)
-                case .failure(let error):
-                    importResultAlert = "Ошибка выбора файла: \(error.localizedDescription)"
-                    showImportResult = true
-                }
+            .background {
+                Color.clear
+                    .fileImporter(
+                        isPresented: $showJSONImporter,
+                        allowedContentTypes: [.json],
+                        allowsMultipleSelection: false
+                    ) { result in
+                        switch result {
+                        case .success(let urls):
+                            guard let url = urls.first else { return }
+                            performImport(from: url)
+                        case .failure(let error):
+                            importResultAlert = "Ошибка выбора файла: \(error.localizedDescription)"
+                            showImportResult = true
+                        }
+                    }
             }
-            .alert(
-                "Импорт / Экспорт",
-                isPresented: $showImportResult
-            ) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(importResultAlert ?? "")
+            .background {
+                Color.clear
+                    .fileImporter(
+                        isPresented: $showCSVImporter,
+                        allowedContentTypes: [.commaSeparatedText, .text],
+                        allowsMultipleSelection: false
+                    ) { result in
+                        switch result {
+                        case .success(let urls):
+                            guard let url = urls.first else { return }
+                            performCSVImport(from: url)
+                        case .failure(let error):
+                            importResultAlert = "Ошибка выбора файла: \(error.localizedDescription)"
+                            showImportResult = true
+                        }
+                    }
+            }
+            .background {
+                Color.clear
+                    .alert(
+                        "Импорт / Экспорт",
+                        isPresented: $showImportResult
+                    ) {
+                        Button("OK", role: .cancel) {}
+                    } message: {
+                        Text(importResultAlert ?? "")
+                    }
             }
         }
     }
@@ -458,6 +494,52 @@ struct FinanceView: View {
             showImportResult = true
         } catch {
             importResultAlert = "Ошибка импорта: \(error.localizedDescription)"
+            showImportResult = true
+        }
+    }
+    
+    private func performCSVImport(from url: URL) {
+        guard url.startAccessingSecurityScopedResource() else {
+            importResultAlert = "Нет прав доступа к выбранному файлу."
+            showImportResult = true
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            guard let csvText = String(data: data, encoding: .utf8) else {
+                throw CocoaError(.fileReadUnknownStringEncoding)
+            }
+            
+            let dtos = try FinanceImportExportService.shared.importFromCSV(text: csvText)
+            let existingIDs = Set(transactions.map { $0.id })
+            var importCount = 0
+            
+            for dto in dtos {
+                guard !existingIDs.contains(dto.id) else { continue }
+                let tx = Transaction(
+                    title: dto.title,
+                    amount: dto.amount,
+                    type: TransactionType(rawValue: dto.type) ?? .expense,
+                    category: dto.category,
+                    date: dto.date,
+                    note: dto.note
+                )
+                tx.id = dto.id
+                modelContext.insert(tx)
+                importCount += 1
+            }
+            
+            if importCount > 0 {
+                try modelContext.save()
+                exportToiCloud() // Sync to iCloud
+            }
+            
+            importResultAlert = "Импорт завершен успешно! Добавлено \(importCount) транзакций из CSV."
+            showImportResult = true
+        } catch {
+            importResultAlert = "Ошибка импорта CSV: \(error.localizedDescription)"
             showImportResult = true
         }
     }
