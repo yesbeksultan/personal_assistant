@@ -35,7 +35,7 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
         case .calendar: return "calendar"
         case .markdown: return "doc.richtext"
         case .notes:    return "note.text"
-        case .game24:   return "brain"
+        case .game24:   return "suit.spade.fill"
         }
     }
 
@@ -47,7 +47,7 @@ enum AppTab: String, CaseIterable, Identifiable, Codable {
         case .calendar: return Color(hex: "5ee7df")
         case .markdown: return Color(hex: "43e97b")
         case .notes:    return Color(hex: "fa709a")
-        case .game24:   return Color(hex: "ff9a9e")
+        case .game24:   return Color(hex: "f5576c")
         }
     }
 
