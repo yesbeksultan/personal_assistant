@@ -20,15 +20,53 @@ final class GeminiService: ObservableObject {
         
         private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
         
-        private let systemPrompt = """
-        Ты — Friday, персональный AI-ассистент. Ты помогаешь пользователю с:
-        1. Управлением задачами — помогаешь планировать день, расставлять приоритеты.
-        2. Финансами — даёшь советы по бюджету, анализируешь расходы.
-        3. Общими вопросами — отвечаешь на любые вопросы.
-        
-        Отвечай кратко, дружелюбно и по делу. Используй эмодзи для наглядности.
-        Язык общения — русский.
-        """
+        private var systemPrompt: String {
+            let now = Date()
+            let cal = Calendar.current
+
+            let dateFormatter = DateFormatter()
+            dateFormatter.locale = Locale(identifier: "ru_RU")
+            dateFormatter.dateFormat = "d MMMM yyyy"
+            let dateStr = dateFormatter.string(from: now)
+
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "HH:mm"
+            let timeStr = timeFormatter.string(from: now)
+
+            let weekdayFormatter = DateFormatter()
+            weekdayFormatter.locale = Locale(identifier: "ru_RU")
+            weekdayFormatter.dateFormat = "EEEE"
+            let weekdayStr = weekdayFormatter.string(from: now).capitalized
+
+            let hour = cal.component(.hour, from: now)
+            let timeOfDay: String
+            switch hour {
+            case 5..<12:  timeOfDay = "утро"
+            case 12..<17: timeOfDay = "день"
+            case 17..<22: timeOfDay = "вечер"
+            default:      timeOfDay = "ночь"
+            }
+
+            let tzName = TimeZone.current.localizedName(for: .standard, locale: Locale(identifier: "ru_RU")) ?? TimeZone.current.identifier
+
+            return """
+            Ты — Friday, персональный AI-ассистент. Ты помогаешь пользователю с:
+            1. Управлением задачами — помогаешь планировать день, расставлять приоритеты.
+            2. Финансами — даёшь советы по бюджету, анализируешь расходы.
+            3. Общими вопросами — отвечаешь на любые вопросы.
+
+            Отвечай кратко, дружелюбно и по делу. Используй эмодзи для наглядности.
+            Язык общения — русский.
+
+            ТЕКУЩЕЕ ВРЕМЯ И ДАТА:
+            - Дата: \(dateStr) (\(weekdayStr))
+            - Время: \(timeStr) (\(timeOfDay))
+            - Часовой пояс: \(tzName)
+
+            Всегда используй эти данные при ответах на вопросы о времени, дате, дне недели и т.п.
+            Никогда не говори что не знаешь текущую дату или время.
+            """
+        }
         
         @Published var isLoading = false
         
