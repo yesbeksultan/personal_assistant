@@ -8,6 +8,8 @@ struct SettingsView: View {
     // API
     @State private var apiKey = ""
     @State private var showSavedAlert = false
+    @State private var serperApiKey = ""
+    @State private var showSerperSavedAlert = false
 
     // Notification permission
     @State private var authStatus: UNAuthorizationStatus = .notDetermined
@@ -80,6 +82,52 @@ struct SettingsView: View {
                                 .disabled(apiKey.isEmpty)
                             }
                         }
+
+                        // MARK: — Serper API (Web Search)
+                        SettingsSection(icon: "magnifyingglass", title: "Poиск в интернете", gradient: [Color(hex: "11998e"), Color(hex: "38ef7d")]) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Serper.dev — Google-поиск для AI. Бесплатно 2500 запросов.\nПолучи ключ: serper.dev")
+                                    .font(.caption)
+                                    .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+
+                                SecureField("Serper API ключ", text: $serperApiKey)
+                                    .textFieldStyle(.plain)
+                                    .foregroundStyle(AppColors.textPrimary)
+                                    .padding(14)
+                                    .background(AppColors.textPrimary.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(WebSearchService.shared.hasSerperKey ? Color(hex: "43e97b") : Color(hex: "fa709a"))
+                                        .frame(width: 8, height: 8)
+                                    Text(WebSearchService.shared.hasSerperKey
+                                         ? "Ключ настроен — поиск активен 🌐"
+                                         : "Без ключа: Wikipedia + погода + валюты")
+                                        .font(.caption)
+                                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                                }
+
+                                Button {
+                                    WebSearchService.shared.serperApiKey = serperApiKey
+                                    showSerperSavedAlert = true
+                                } label: {
+                                    Text("Сохранить ключ")
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(14)
+                                        .background(
+                                            LinearGradient(colors: [Color(hex: "11998e"), Color(hex: "38ef7d")], startPoint: .leading, endPoint: .trailing)
+                                        )
+                                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                                }
+                                .disabled(serperApiKey.isEmpty)
+                            }
+                        }
+                        .alert("Ключ Serper сохранён ✅", isPresented: $showSerperSavedAlert) { Button("OK") {} }
 
                         // MARK: — Notifications
                         SettingsSection(icon: "bell.fill", title: "Уведомления", gradient: AppGradients.orange) {

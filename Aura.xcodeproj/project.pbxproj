@@ -56,7 +56,8 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		F9592AD02FC3452500118CEB /* aura */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = aura; sourceTree = "<group>"; };
+		F9592AD02FC3452500118CEB /* aura */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Aura; sourceTree = "<group>"; };
+
 		F9592ADE2FC3452600118CEB /* auraTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = auraTests; sourceTree = "<group>"; };
 		F9592AE82FC3452600118CEB /* auraUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = auraUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */

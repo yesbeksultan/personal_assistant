@@ -120,15 +120,35 @@ struct AddTaskView: View {
     }
     
     private func saveTask() {
+        let notif = NotificationService.shared
+
         if let task = editingTask {
-            task.title = title; task.taskDescription = taskDescription
-            task.category = category; task.priority = priority
+            // При редактировании — всегда перезапускаем напоминание
+            notif.cancelTaskReminder(for: task)
+
+            task.title = title
+            task.taskDescription = taskDescription
+            task.category = category
+            task.priority = priority
             task.dueDate = hasDueDate ? dueDate : nil
+
+            if hasDueDate {
+                notif.scheduleTaskReminder(for: task)
+            }
         } else {
-            let task = TaskItem(title: title, taskDescription: taskDescription, category: category, priority: priority, dueDate: hasDueDate ? dueDate : nil)
+            let task = TaskItem(
+                title: title,
+                taskDescription: taskDescription,
+                category: category,
+                priority: priority,
+                dueDate: hasDueDate ? dueDate : nil
+            )
             modelContext.insert(task)
-            if hasDueDate { NotificationService.shared.scheduleTaskReminder(for: task) }
+            if hasDueDate {
+                notif.scheduleTaskReminder(for: task)
+            }
         }
         dismiss()
     }
+
 }

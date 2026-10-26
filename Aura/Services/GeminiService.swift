@@ -54,6 +54,8 @@ final class GeminiService: ObservableObject {
             1. Управлением задачами — помогаешь планировать день, расставлять приоритеты.
             2. Финансами — даёшь советы по бюджету, анализируешь расходы.
             3. Общими вопросами — отвечаешь на любые вопросы.
+            4. Поиском в интернете — когда пользователь просит найти актуальную информацию,
+               ты получаешь результаты из интернета и используешь их в своём ответе.
 
             Отвечай кратко, дружелюбно и по делу. Используй эмодзи для наглядности.
             Язык общения — русский.
@@ -65,6 +67,9 @@ final class GeminiService: ObservableObject {
 
             Всегда используй эти данные при ответах на вопросы о времени, дате, дне недели и т.п.
             Никогда не говори что не знаешь текущую дату или время.
+
+            ВАЖНО: Если в твоём контексте есть блок «РЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ»,
+            обязательно опирайся на эти данные и укажи, что информация получена из сети.
             """
         }
         
@@ -110,6 +115,22 @@ final class GeminiService: ObservableObject {
             
             // 1. Формируем динамические системные инструкции (Контекст)
             var dynamicPrompt = systemPrompt
+
+            // 🌐 Web Search: автоматически выполняем поиск если нужно
+            if let detection = WebSearchDetector.detect(from: message) {
+                do {
+                    let searchResults = try await WebSearchService.shared.search(
+                        query: detection.query,
+                        intent: detection.intent
+                    )
+                    dynamicPrompt += "\n\nРЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ:\n"
+                    dynamicPrompt += searchResults
+                    dynamicPrompt += "\n(Используй эти данные для ответа пользователю, укажи что информация из интернета)\n"
+                } catch {
+                    // Не блокируем основной поток если поиск упал
+                    dynamicPrompt += "\n\n[Поиск в интернете временно недоступен: \(error.localizedDescription)]\n"
+                }
+            }
             
             let txForContext: [Transaction] = period != nil ? filter(transactions: transactions, by: period!) : transactions
             

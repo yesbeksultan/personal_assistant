@@ -84,13 +84,30 @@ struct TasksView: View {
                 .padding(.horizontal).padding(.top, 8)
                 
                 ForEach(viewModel.filteredTasks(tasks), id: \.id) { task in
-                    TaskRow(task: task) { withAnimation(.spring(response: 0.3)) { task.isCompleted.toggle() } }
+                    TaskRow(task: task) {
+                        withAnimation(.spring(response: 0.3)) {
+                            task.isCompleted.toggle()
+                            if task.isCompleted {
+                                // Задача выполнена — отменяем уведомления
+                                NotificationService.shared.cancelTaskReminder(for: task)
+                            } else if let due = task.dueDate, due > Date() {
+                                // Задача снова активна и дедлайн в будущем — ставим уведомление
+                                NotificationService.shared.scheduleTaskReminder(for: task)
+                            }
+                        }
+                    }
                         .contextMenu {
                             Button { editingTask = task } label: { Label("Редактировать", systemImage: "pencil") }
-                            Button(role: .destructive) { withAnimation { modelContext.delete(task) } } label: { Label("Удалить", systemImage: "trash") }
+                            Button(role: .destructive) {
+                                withAnimation {
+                                    NotificationService.shared.cancelTaskReminder(for: task)
+                                    modelContext.delete(task)
+                                }
+                            } label: { Label("Удалить", systemImage: "trash") }
                         }
                         .padding(.horizontal)
                 }
+
             }
             .padding(.bottom, 100)
         }
