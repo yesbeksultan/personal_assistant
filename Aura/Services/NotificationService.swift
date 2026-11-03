@@ -14,6 +14,7 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     }
 
     // MARK: - UNUserNotificationCenterDelegate
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -21,6 +22,33 @@ class NotificationService: NSObject, UNUserNotificationCenterDelegate {
     ) {
         // Show notifications even when the app is active/foreground
         completionHandler([.banner, .sound, .list, .badge])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        tryParseBankNotification(response.notification)
+        completionHandler()
+    }
+
+    // MARK: - Bank notification parsing
+
+    /// Called for every received notification; silently ignores non-bank ones.
+    func tryParseBankNotification(_ notification: UNNotification) {
+        let content   = notification.request.content
+        let bundleID  = notification.request.identifier   // may carry bundle info in some flows
+        let title     = content.title
+        let body      = content.body
+
+        if let draft = BankNotificationParser.shared.tryParse(
+            title: title,
+            body: body,
+            bundleID: bundleID
+        ) {
+            PendingTransactionDrafts.shared.add(draft)
+        }
     }
 
     // MARK: - Identifiers

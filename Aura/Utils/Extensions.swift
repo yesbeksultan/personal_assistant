@@ -8,12 +8,32 @@ extension Date {
         Calendar.current.isDateInToday(self)
     }
     
+    var isTomorrow: Bool {
+        Calendar.current.isDateInTomorrow(self)
+    }
+    
+    var isYesterday: Bool {
+        Calendar.current.isDateInYesterday(self)
+    }
+    
     var isThisWeek: Bool {
         Calendar.current.isDate(self, equalTo: Date(), toGranularity: .weekOfYear)
     }
     
     var isThisMonth: Bool {
         Calendar.current.isDate(self, equalTo: Date(), toGranularity: .month)
+    }
+    
+    var smartDueFormatted: String {
+        if isToday {
+            return "Сегодня в \(timeFormatted)"
+        } else if isTomorrow {
+            return "Завтра в \(timeFormatted)"
+        } else if isYesterday {
+            return "Вчера в \(timeFormatted)"
+        } else {
+            return "\(shortFormatted), \(timeFormatted)"
+        }
     }
     
     var shortFormatted: String {

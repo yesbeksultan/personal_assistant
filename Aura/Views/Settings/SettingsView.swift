@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var serperApiKey = ""
     @State private var showSerperSavedAlert = false
 
+    // Bank notification parsing
+    @State private var bankParsingEnabled = BankNotificationParser.shared.isEnabled
+
     // Notification permission
     @State private var authStatus: UNAuthorizationStatus = .notDetermined
 
@@ -245,6 +248,43 @@ struct SettingsView: View {
                                 Text("☀️ Светлая").tag("light")
                             }
                             .pickerStyle(.segmented)
+                        }
+
+                        // MARK: — Bank Notification Parsing
+                        SettingsSection(
+                            icon: "bell.badge.fill",
+                            title: "Авто-распознавание банков",
+                            gradient: [Color(hex: "fa709a"), Color(hex: "fee140")]
+                        ) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Toggle(isOn: $bankParsingEnabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Распознавать уведомления банков")
+                                            .font(.subheadline).fontWeight(.medium)
+                                            .foregroundStyle(AppColors.textPrimary)
+                                        Text("Kaspi, Halyk, Forte, Jysan и другие")
+                                            .font(.caption)
+                                            .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                                    }
+                                }
+                                .tint(Color(hex: "667eea"))
+                                .onChange(of: bankParsingEnabled) {
+                                    BankNotificationParser.shared.isEnabled = bankParsingEnabled
+                                }
+
+                                Text("При включённой опции уведомления от банков анализируются и предлагаются для добавления в расходы/доходы. Данные не покидают устройство.")
+                                    .font(.caption)
+                                    .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+
+                                HStack(spacing: 6) {
+                                    Image(systemName: "lock.shield.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(Color(hex: "43e97b"))
+                                    Text("Полностью офлайн · Без отправки данных")
+                                        .font(.caption2)
+                                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                                }
+                            }
                         }
 
                         // MARK: — About

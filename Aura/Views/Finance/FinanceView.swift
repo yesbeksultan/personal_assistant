@@ -12,6 +12,7 @@ struct FinanceView: View {
     @State private var isSensitiveUnlocked: Bool = false
     @State private var authError: String? = nil
     @State private var showManageCategories = false
+    @State private var showManualParser = false
     private let syncService = iCloudDataSyncService.shared
     
     // Import/Export State
@@ -31,6 +32,8 @@ struct FinanceView: View {
                 
                 ScrollView {
                     VStack(spacing: 16) {
+                        PendingDraftsBanner()
+                        ClipboardDetectedBanner()
                         balanceCard
                         periodPicker
                         incomeExpenseRow
@@ -49,6 +52,12 @@ struct FinanceView: View {
                             showManageCategories = true
                         } label: {
                             Label("Категории", systemImage: "tag")
+                        }
+
+                        Button {
+                            showManualParser = true
+                        } label: {
+                            Label("Распознать СМС / уведомление", systemImage: "bell.badge")
                         }
                         
                         Divider()
@@ -103,6 +112,9 @@ struct FinanceView: View {
             }
             .sheet(isPresented: $showManageCategories) {
                 ManageCategoriesView()
+            }
+            .sheet(isPresented: $showManualParser) {
+                ManualNotificationParseView()
             }
             .alert(
                 "Ошибка аутентификации",

@@ -56,8 +56,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		F9592AD02FC3452500118CEB /* aura */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Aura; sourceTree = "<group>"; };
-
+		F9592AD02FC3452500118CEB /* Aura */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Aura; sourceTree = "<group>"; };
 		F9592ADE2FC3452600118CEB /* auraTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = auraTests; sourceTree = "<group>"; };
 		F9592AE82FC3452600118CEB /* auraUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = auraUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -92,7 +91,7 @@
 			children = (
 				F99EE5182FD0AC0300B70C12 /* IMG_1804.png */,
 				D10002 /* Aura */,
-				F9592AD02FC3452500118CEB /* aura */,
+				F9592AD02FC3452500118CEB /* Aura */,
 				F9592ADE2FC3452600118CEB /* auraTests */,
 				F9592AE82FC3452600118CEB /* auraUITests */,
 				D10010 /* Products */,
@@ -233,7 +232,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				F9592AD02FC3452500118CEB /* aura */,
+				F9592AD02FC3452500118CEB /* Aura */,
 			);
 			name = Friday;
 			packageProductDependencies = (
