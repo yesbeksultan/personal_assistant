@@ -38,27 +38,28 @@ extension Date {
     
     var shortFormatted: String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.dateFormat = "d MMM"
         return formatter.string(from: self)
     }
     
     var timeFormatted: String {
         let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: self)
     }
     
     var fullFormatted: String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.dateFormat = "d MMMM yyyy, HH:mm"
         return formatter.string(from: self)
     }
     
     var dayOfWeek: String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.dateFormat = "EEEE"
         return formatter.string(from: self).capitalized
     }

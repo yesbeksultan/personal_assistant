@@ -11,235 +11,248 @@ public enum FinancePeriod: String, CaseIterable, Equatable {
 /// Service for communicating with Google Gemini API
 final class GeminiService: ObservableObject {
     static let shared = GeminiService()
-        
-        // MARK: - Configuration
-        // ВНИМАНИЕ: Для продакшена перенесите хранение ключа в Keychain!
-        private var apiKey: String {
-            UserDefaults.standard.string(forKey: "gemini_api_key") ?? ""
+    
+    // MARK: - Configuration
+    private var apiKey: String {
+        UserDefaults.standard.string(forKey: "gemini_api_key") ?? ""
+    }
+    
+    // Используется одна фиксированная модель
+    private let modelName = "gemini-3.1-flash-lite"
+    
+    private var systemPrompt: String {
+        let now = Date()
+        let cal = Calendar.autoupdatingCurrent
+        let locale = Locale.autoupdatingCurrent
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = locale
+        dateFormatter.dateFormat = "d MMMM yyyy"
+        let dateStr = dateFormatter.string(from: now)
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.locale = locale
+        timeFormatter.dateFormat = "HH:mm"
+        let timeStr = timeFormatter.string(from: now)
+
+        let weekdayFormatter = DateFormatter()
+        weekdayFormatter.locale = locale
+        weekdayFormatter.dateFormat = "EEEE"
+        let weekdayStr = weekdayFormatter.string(from: now).capitalized
+
+        let hour = cal.component(.hour, from: now)
+        let timeOfDay: String
+        switch hour {
+        case 5..<12:  timeOfDay = "утро"
+        case 12..<17: timeOfDay = "день"
+        case 17..<22: timeOfDay = "вечер"
+        default:      timeOfDay = "ночь"
+        }
+
+        let tzName = TimeZone.autoupdatingCurrent.localizedName(for: .standard, locale: locale) ?? TimeZone.autoupdatingCurrent.identifier
+
+        return """
+        Ты — Friday, персональный AI-ассистент. Ты помогаешь пользователю с:
+        1. Управлением задачами — помогаешь планировать день, расставлять приоритеты.
+        2. Финансами — даёшь советы по бюджету, анализируешь расходы.
+        3. Общими вопросами — отвечаешь на любые вопросы, даёшь полезные советы.
+
+        Отвечай кратко, ёмко, дружелюбно и по делу. Используй эмодзи для наглядности.
+        Язык общения — русский (или язык запроса пользователя).
+
+        ТЕКУЩЕЕ ВРЕМЯ И РЕГИОН:
+        - Дата: \(dateStr) (\(weekdayStr))
+        - Время: \(timeStr) (\(timeOfDay))
+        - Часовой пояс: \(tzName)
+        - Регион устройства: \(locale.region?.identifier ?? "KZ")
+
+        Всегда используй эти данные при ответах на вопросы о времени, дате и дне недели.
+        """
+    }
+    
+    @Published var isLoading = false
+    
+    // MARK: - Formatters
+    private static let shortDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = Locale.autoupdatingCurrent
+        df.dateFormat = "dd.MM"
+        return df
+    }()
+    
+    private static let timeDateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = Locale.autoupdatingCurrent
+        df.dateFormat = "d MMM, HH:mm"
+        return df
+    }()
+    
+    // MARK: - Public Methods
+    
+    func sendMessage(
+        _ message: String,
+        period: FinancePeriod? = nil,
+        context: [ChatMessage] = [],
+        tasks: [TaskItem] = [],
+        transactions: [Transaction] = [],
+        calendarEvents: [CalendarEvent] = []
+    ) async throws -> String {
+        guard !apiKey.isEmpty else {
+            return "⚠️ API ключ не настроен. Перейди в Настройки → введи свой Gemini API ключ.\n\nПолучить ключ бесплатно: https://aistudio.google.com/"
         }
         
-        private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent"
+        isLoading = true
+        defer { isLoading = false }
         
-        private var systemPrompt: String {
-            let now = Date()
-            let cal = Calendar.current
-
-            let dateFormatter = DateFormatter()
-            dateFormatter.locale = Locale(identifier: "ru_RU")
-            dateFormatter.dateFormat = "d MMMM yyyy"
-            let dateStr = dateFormatter.string(from: now)
-
-            let timeFormatter = DateFormatter()
-            timeFormatter.dateFormat = "HH:mm"
-            let timeStr = timeFormatter.string(from: now)
-
-            let weekdayFormatter = DateFormatter()
-            weekdayFormatter.locale = Locale(identifier: "ru_RU")
-            weekdayFormatter.dateFormat = "EEEE"
-            let weekdayStr = weekdayFormatter.string(from: now).capitalized
-
-            let hour = cal.component(.hour, from: now)
-            let timeOfDay: String
-            switch hour {
-            case 5..<12:  timeOfDay = "утро"
-            case 12..<17: timeOfDay = "день"
-            case 17..<22: timeOfDay = "вечер"
-            default:      timeOfDay = "ночь"
+        // 1. Формируем компактные системные инструкции
+        var dynamicPrompt = systemPrompt
+        
+        // Быстрый справочник погоды или валюты (локально, без расхода токенов)
+        if let detection = WebSearchDetector.detect(from: message) {
+            switch detection.intent {
+            case .weather, .currency:
+                if let directInfo = try? await WebSearchService.shared.search(query: detection.query, intent: detection.intent) {
+                    dynamicPrompt += "\n\nДАННЫЕ СПРАВОЧНИКА:\n\(directInfo)\n"
+                }
+            case .general:
+                break
             }
-
-            let tzName = TimeZone.current.localizedName(for: .standard, locale: Locale(identifier: "ru_RU")) ?? TimeZone.current.identifier
-
-            return """
-            Ты — Friday, персональный AI-ассистент. Ты помогаешь пользователю с:
-            1. Управлением задачами — помогаешь планировать день, расставлять приоритеты.
-            2. Финансами — даёшь советы по бюджету, анализируешь расходы.
-            3. Общими вопросами — отвечаешь на любые вопросы.
-            4. Поиском в интернете — когда пользователь просит найти актуальную информацию,
-               ты получаешь результаты из интернета и используешь их в своём ответе.
-
-            Отвечай кратко, дружелюбно и по делу. Используй эмодзи для наглядности.
-            Язык общения — русский.
-
-            ТЕКУЩЕЕ ВРЕМЯ И ДАТА:
-            - Дата: \(dateStr) (\(weekdayStr))
-            - Время: \(timeStr) (\(timeOfDay))
-            - Часовой пояс: \(tzName)
-
-            Всегда используй эти данные при ответах на вопросы о времени, дате, дне недели и т.п.
-            Никогда не говори что не знаешь текущую дату или время.
-
-            ВАЖНО: Если в твоём контексте есть блок «РЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ»,
-            обязательно опирайся на эти данные и укажи, что информация получена из сети.
-            """
         }
         
-        @Published var isLoading = false
+        // Включаем контекст только по необходимости, чтобы не раздувать токены
+        var contextLines: [String] = []
         
-        // MARK: - Formatters (Optimized)
-        private static let shortDateFormatter: DateFormatter = {
-            let df = DateFormatter()
-            df.locale = Locale(identifier: "ru_RU")
-            df.dateFormat = "dd.MM.yyyy"
-            return df
-        }()
+        // Задачи: только если есть активные, кратко
+        let pendingTasks = tasks.filter { !$0.isCompleted }
+        if !pendingTasks.isEmpty {
+            let topTasks = pendingTasks.prefix(3).map { $0.title }.joined(separator: ", ")
+            contextLines.append("Задачи (\(pendingTasks.count) шт.): приоритетные: \(topTasks)")
+        }
         
-        private static let timeDateFormatter: DateFormatter = {
-            let df = DateFormatter()
-            df.locale = Locale(identifier: "ru_RU")
-            df.dateFormat = "d MMMM, HH:mm"
-            return df
-        }()
+        // Финансы: включаем подробности только если явно выбран финансовый режим или вопрос про деньги
+        let mentionsFinance = message.lowercased().contains("расход") ||
+                              message.lowercased().contains("доход") ||
+                              message.lowercased().contains("трат") ||
+                              message.lowercased().contains("баланс") ||
+                              message.lowercased().contains("бюджет") ||
+                              period != nil
         
-        // MARK: - Public Methods
+        if mentionsFinance && !transactions.isEmpty {
+            let txFiltered = period != nil ? filter(transactions: transactions, by: period!) : transactions
+            let income = txFiltered.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
+            let expense = txFiltered.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
+            contextLines.append("Финансы: доход \(Int(income)) ₸, расход \(Int(expense)) ₸ (баланс: \(Int(income - expense)) ₸)")
+            
+            // Последние 5 операций
+            let recentTx = txFiltered.prefix(5)
+            if !recentTx.isEmpty {
+                let txList = recentTx.map { tx in
+                    let sign = tx.type == .income ? "+" : "-"
+                    return "\(Self.shortDateFormatter.string(from: tx.date)) \(tx.title) (\(sign)\(Int(tx.amount)) ₸)"
+                }.joined(separator: "; ")
+                contextLines.append("Последние операции: \(txList)")
+            }
+        }
         
-        func sendMessage(
-            _ message: String,
-            period: FinancePeriod? = nil,
-            context: [ChatMessage] = [],
-            tasks: [TaskItem] = [],
-            transactions: [Transaction] = [],
-            calendarEvents: [CalendarEvent] = []
-        ) async throws -> String {
-            guard !apiKey.isEmpty else {
-                return "⚠️ API ключ не настроен. Перейди в Настройки → введи свой Gemini API ключ.\n\nПолучить ключ: https://aistudio.google.com/"
-            }
-            
-            // Включаем индикатор загрузки и гарантируем его отключение при выходе
-            isLoading = true
-            defer { isLoading = false }
-            
-            let url = URL(string: "\(baseURL)?key=\(apiKey)")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            
-            // 1. Формируем динамические системные инструкции (Контекст)
-            var dynamicPrompt = systemPrompt
-
-            // 🌐 Web Search: автоматически выполняем поиск если нужно
-            if let detection = WebSearchDetector.detect(from: message) {
-                do {
-                    let searchResults = try await WebSearchService.shared.search(
-                        query: detection.query,
-                        intent: detection.intent
-                    )
-                    dynamicPrompt += "\n\nРЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ:\n"
-                    dynamicPrompt += searchResults
-                    dynamicPrompt += "\n(Используй эти данные для ответа пользователю, укажи что информация из интернета)\n"
-                } catch {
-                    // Не блокируем основной поток если поиск упал
-                    dynamicPrompt += "\n\n[Поиск в интернете временно недоступен: \(error.localizedDescription)]\n"
-                }
-            }
-            
-            let txForContext: [Transaction] = period != nil ? filter(transactions: transactions, by: period!) : transactions
-            
-            if !tasks.isEmpty || !txForContext.isEmpty || !calendarEvents.isEmpty {
-                dynamicPrompt += "\n\nТЕКУЩИЙ КОНТЕКСТ ПОЛЬЗОВАТЕЛЯ:\n"
-                
-                // Задачи
-                let pendingTasks = tasks.filter { !$0.isCompleted }
-                dynamicPrompt += "Незавершённых задач: \(pendingTasks.count). "
-                if !pendingTasks.isEmpty {
-                    dynamicPrompt += "Приоритетные: " + pendingTasks.prefix(3).map { $0.title }.joined(separator: ", ") + ".\n"
-                }
-                
-                // Финансы
-                if let period = period {
-                    let income = txForContext.filter { $0.type == .income }.reduce(0) { $0 + $1.amount }
-                    let expense = txForContext.filter { $0.type == .expense }.reduce(0) { $0 + $1.amount }
-                    dynamicPrompt += "Финансы за период (\(period.rawValue)): доход: \(Int(income)) ₸, расход: \(Int(expense)) ₸.\n"
-                    
-                    if !txForContext.isEmpty {
-                        // Ограничиваем список транзакций, чтобы не превысить лимит токенов API
-                        let limitedTx = txForContext.prefix(50)
-                        dynamicPrompt += "Последние транзакции (\(limitedTx.count) шт.):\n"
-                        for tx in limitedTx {
-                            let sign = tx.type == .income ? "+" : "-"
-                            let line = "- \(Self.shortDateFormatter.string(from: tx.date)) [\(tx.type.rawValue)] \(tx.title) — \(sign)\(Int(tx.amount)) ₸ (\(tx.category))"
-                            dynamicPrompt += line + "\n"
-                        }
-                    }
-                }
-                
-                // Календарь
-                if !calendarEvents.isEmpty {
-                    dynamicPrompt += "\nПредстоящие события (\(calendarEvents.count) шт.):\n"
-                    for event in calendarEvents {
-                        let timeStr = event.isAllDay ? "весь день" : Self.timeDateFormatter.string(from: event.startDate)
-                        var line = "- \(timeStr): \(event.title)"
-                        if let loc = event.location, !loc.isEmpty { line += " [\(loc)]" }
-                        dynamicPrompt += line + "\n"
-                    }
-                }
-            }
-            
-            // 2. Собираем историю диалога
-            var contents: [[String: Any]] = []
-            let recentContext = context.suffix(10) // Ограничиваем историю 10 сообщениями
-            
-            for msg in recentContext {
-                contents.append([
-                    "role": msg.isFromUser ? "user" : "model",
-                    "parts": [["text": msg.content]]
-                ])
-            }
-            
-            // Добавляем текущее сообщение пользователя
+        // Календарь: только если переданы события
+        if !calendarEvents.isEmpty {
+            let topEvents = calendarEvents.prefix(3).map { event in
+                let timeStr = event.isAllDay ? "весь день" : Self.timeDateFormatter.string(from: event.startDate)
+                return "\(timeStr): \(event.title)"
+            }.joined(separator: "; ")
+            contextLines.append("События: \(topEvents)")
+        }
+        
+        if !contextLines.isEmpty {
+            dynamicPrompt += "\n\nКОНТЕКСТ:\n" + contextLines.joined(separator: "\n")
+        }
+        
+        // 2. Компактная история диалога (последние 5 сообщений)
+        var contents: [[String: Any]] = []
+        let recentContext = context.suffix(5)
+        
+        for msg in recentContext {
             contents.append([
-                "role": "user",
-                "parts": [["text": message]]
+                "role": msg.isFromUser ? "user" : "model",
+                "parts": [["text": msg.content]]
             ])
-            
-            // 3. Формируем итоговый JSON (используем нативный systemInstruction)
-            let body: [String: Any] = [
-                "systemInstruction": [
-                    "parts": [["text": dynamicPrompt]]
-                ],
-                "contents": contents,
-                "generationConfig": [
-                    "temperature": 0.7,
-                    "topP": 0.95,
-                    "topK": 40,
-                    "maxOutputTokens": 1024
-                ]
-            ]
-            
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            
-            // 4. Выполняем сетевой запрос
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw GeminiError.invalidResponse
-            }
-            
-            guard httpResponse.statusCode == 200 else {
-                let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
-                throw GeminiError.apiError("Status \(httpResponse.statusCode): \(errorBody)")
-            }
-            
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let candidates = json["candidates"] as? [[String: Any]],
-                  let firstCandidate = candidates.first,
-                  let content = firstCandidate["content"] as? [String: Any],
-                  let parts = content["parts"] as? [[String: Any]],
-                  let text = parts.first?["text"] as? String else {
-                throw GeminiError.parsingError
-            }
-            
-            return text
         }
+        
+        contents.append([
+            "role": "user",
+            "parts": [["text": message]]
+        ])
+        
+        // 3. Выполняем прямой сетевой запрос к одной модели
+        return try await performGenerateRequest(systemInstruction: dynamicPrompt, contents: contents)
+    }
+    
+    // MARK: - Direct Request Execution
+    
+    private func performGenerateRequest(
+        systemInstruction: String,
+        contents: [[String: Any]]
+    ) async throws -> String {
+        let endpoint = "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent?key=\(apiKey)"
+        guard let url = URL(string: endpoint) else {
+            throw GeminiError.invalidResponse
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 15
+        
+        let body: [String: Any] = [
+            "systemInstruction": [
+                "parts": [["text": systemInstruction]]
+            ],
+            "contents": contents,
+            "generationConfig": [
+                "temperature": 0.7,
+                "topP": 0.95,
+                "topK": 40,
+                "maxOutputTokens": 800
+            ]
+        ]
+        
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GeminiError.invalidResponse
+        }
+        
+        guard httpResponse.statusCode == 200 else {
+            if httpResponse.statusCode == 429 {
+                throw GeminiError.rateLimited
+            }
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw GeminiError.apiError("Status \(httpResponse.statusCode): \(errorBody)")
+        }
+        
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let candidates = json["candidates"] as? [[String: Any]],
+              let firstCandidate = candidates.first,
+              let content = firstCandidate["content"] as? [String: Any],
+              let parts = content["parts"] as? [[String: Any]],
+              let text = parts.first?["text"] as? String else {
+            throw GeminiError.parsingError
+        }
+        
+        return text
+    }
     
     /// Generate daily summary using AI
     func generateDailySummary(tasks: [TaskItem], transactions: [Transaction]) async throws -> String {
         let pendingTasks = tasks.filter { !$0.isCompleted }
-        let todayTransactions = transactions.filter { Calendar.current.isDateInToday($0.date) }
+        let todayTransactions = transactions.filter { Calendar.autoupdatingCurrent.isDateInToday($0.date) }
         
         var prompt = "Составь краткую вечернюю сводку дня:\n\n"
         
         prompt += "📋 Незавершённые задачи (\(pendingTasks.count)):\n"
-        for task in pendingTasks.prefix(10) {
+        for task in pendingTasks.prefix(6) {
             prompt += "- \(task.title) [\(task.priority.rawValue)]\n"
         }
         
@@ -253,7 +266,6 @@ final class GeminiService: ObservableObject {
         prompt += "\n💰 Финансы за сегодня:\n"
         prompt += "- Доходы: \(Int(todayIncome)) ₸\n"
         prompt += "- Расходы: \(Int(todayExpenses)) ₸\n"
-        
         prompt += "\nДай краткие рекомендации на вечер и на завтра."
         
         return try await sendMessage(prompt)
@@ -268,7 +280,7 @@ final class GeminiService: ObservableObject {
     }
     
     private func filter(transactions: [Transaction], by period: FinancePeriod) -> [Transaction] {
-        let cal = Calendar.current
+        let cal = Calendar.autoupdatingCurrent
         return transactions.filter { tx in
             switch period {
             case .day:
@@ -286,6 +298,7 @@ final class GeminiService: ObservableObject {
 
 enum GeminiError: LocalizedError {
     case invalidResponse
+    case rateLimited
     case apiError(String)
     case parsingError
     
@@ -293,6 +306,8 @@ enum GeminiError: LocalizedError {
         switch self {
         case .invalidResponse:
             return "Некорректный ответ от сервера"
+        case .rateLimited:
+            return "⏳ Лимит запросов Gemini исчерпан (429). Подожди 10 секунд и отправь запрос снова."
         case .apiError(let message):
             return "Ошибка API: \(message)"
         case .parsingError:

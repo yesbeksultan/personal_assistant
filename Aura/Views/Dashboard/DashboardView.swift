@@ -301,7 +301,7 @@ struct DashboardView: View {
     
     private func dayLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.dateFormat = "EE"
         return formatter.string(from: date)
     }

@@ -293,7 +293,7 @@ struct SettingsView: View {
                                 Text("Friday — персональный AI-ассистент")
                                     .font(.subheadline)
                                     .foregroundStyle(AppColors.textPrimary.opacity(0.7))
-                                Text("Версия 1.0.0 · Gemini 3.1 Flash Lite")
+                                Text("Версия 1.0.0 · Gemini 2.5 Flash")
                                     .font(.caption)
                                     .foregroundStyle(AppColors.textPrimary.opacity(0.35))
                             }

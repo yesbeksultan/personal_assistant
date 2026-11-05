@@ -221,7 +221,7 @@ class TaskViewModel {
     
     private func dateSubtitle(for date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.locale = Locale.autoupdatingCurrent
         formatter.dateFormat = "d MMMM, EEEE"
         return formatter.string(from: date).capitalized
     }

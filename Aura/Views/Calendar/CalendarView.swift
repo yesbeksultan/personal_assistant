@@ -7,31 +7,39 @@ struct CalendarView: View {
     @State private var calendarService = CalendarService.shared
     @State private var selectedDate = Date()
     @State private var showCreateEvent = false
+    @State private var showCalendarFilter = false
     @State private var currentMonth = Date()
 
     var body: some View {
         NavigationStack {
             ZStack {
                 AppColors.appBackground.ignoresSafeArea()
-
-                if !calendarService.isAuthorized {
-                    permissionView
-                } else {
-                    mainContent
-                }
+                mainContent
             }
             .navigationTitle("Календарь")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                if calendarService.isAuthorized {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showCreateEvent = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 17, weight: .regular))
-                                .foregroundStyle(AppColors.textPrimary.opacity(0.7))
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showCalendarFilter = true
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "line.3.horizontal.decrease.circle")
+                                .font(.system(size: 16))
+                            Text("Календари")
+                                .font(.system(size: 13, weight: .medium))
                         }
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.8))
+                    }
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showCreateEvent = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 17, weight: .regular))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.85))
                     }
                 }
             }
@@ -40,61 +48,12 @@ struct CalendarView: View {
                     Task { await calendarService.fetchEvents() }
                 }
             }
+            .sheet(isPresented: $showCalendarFilter) {
+                CalendarFilterSheet()
+            }
             .task {
-                if calendarService.isAuthorized {
-                    await calendarService.fetchEvents()
-                }
+                await calendarService.fetchEvents()
             }
-        }
-    }
-
-    // MARK: - Permission View
-
-    private var permissionView: some View {
-        VStack(spacing: 32) {
-            Spacer()
-
-            ZStack {
-                Circle()
-                    .fill(Color(hex: "667eea").opacity(0.12))
-                    .frame(width: 100, height: 100)
-                Image(systemName: "calendar.badge.plus")
-                    .font(.system(size: 44, weight: .thin))
-                    .foregroundStyle(Color(hex: "667eea"))
-            }
-
-            VStack(spacing: 10) {
-                Text("Доступ к Календарю")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(AppColors.textPrimary)
-
-                Text("Friday может читать и создавать события, чтобы помогать тебе планировать день и передавать расписание ассистенту.")
-                    .font(.subheadline)
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.5))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-            Button {
-                Task { await calendarService.requestAccess() }
-            } label: {
-                Text("Разрешить доступ")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        LinearGradient(
-                            colors: [Color(hex: "667eea"), Color(hex: "764ba2")],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-            }
-            .padding(.horizontal, 32)
-
-            Spacer()
         }
     }
 
@@ -102,7 +61,14 @@ struct CalendarView: View {
 
     private var mainContent: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 16) {
+                // Если нет доступа к календарю телефона — ненавязчивый баннер
+                if !calendarService.isAuthorized {
+                    phoneCalendarBanner
+                        .padding(.horizontal)
+                        .padding(.top, 4)
+                }
+
                 miniCalendar
                     .padding(.horizontal)
 
@@ -117,6 +83,47 @@ struct CalendarView: View {
         .refreshable { await calendarService.fetchEvents() }
     }
 
+    // MARK: - Phone Calendar Permission Banner
+
+    private var phoneCalendarBanner: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(hex: "667eea").opacity(0.15))
+                    .frame(width: 36, height: 36)
+                Image(systemName: "calendar.badge.plus")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color(hex: "667eea"))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Синхронизация с iPhone")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+                Text("Подключи личные события телефона")
+                    .font(.system(size: 11))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+            }
+
+            Spacer()
+
+            Button {
+                Task { await calendarService.requestAccess() }
+            } label: {
+                Text("Включить")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(hex: "667eea"))
+                    .clipShape(Capsule())
+            }
+        }
+        .padding(12)
+        .background(Color(hex: "667eea").opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
     // MARK: - Mini Calendar
 
     private var miniCalendar: some View {
@@ -125,12 +132,12 @@ struct CalendarView: View {
             HStack {
                 Button {
                     withAnimation(.spring(response: 0.4)) {
-                        currentMonth = Calendar.current.date(byAdding: .month, value: -1, to: currentMonth) ?? currentMonth
+                        currentMonth = Calendar.autoupdatingCurrent.date(byAdding: .month, value: -1, to: currentMonth) ?? currentMonth
                     }
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.6))
                         .padding(8)
                 }
 
@@ -144,12 +151,12 @@ struct CalendarView: View {
 
                 Button {
                     withAnimation(.spring(response: 0.4)) {
-                        currentMonth = Calendar.current.date(byAdding: .month, value: 1, to: currentMonth) ?? currentMonth
+                        currentMonth = Calendar.autoupdatingCurrent.date(byAdding: .month, value: 1, to: currentMonth) ?? currentMonth
                     }
                 } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.6))
                         .padding(8)
                 }
             }
@@ -174,8 +181,8 @@ struct CalendarView: View {
                     if let date = day {
                         CalendarDayCell(
                             date: date,
-                            isSelected: Calendar.current.isDate(date, inSameDayAs: selectedDate),
-                            isToday: Calendar.current.isDateInToday(date),
+                            isSelected: Calendar.autoupdatingCurrent.isDate(date, inSameDayAs: selectedDate),
+                            isToday: Calendar.autoupdatingCurrent.isDateInToday(date),
                             hasEvents: calendarService.hasEvents(on: date)
                         ) {
                             withAnimation(.spring(response: 0.3)) {
@@ -221,7 +228,7 @@ struct CalendarView: View {
                     Image(systemName: "calendar")
                         .font(.system(size: 14, weight: .light))
                         .foregroundStyle(AppColors.textPrimary.opacity(0.3))
-                    Text("Нет событий")
+                    Text("Нет событий на этот день")
                         .foregroundStyle(AppColors.textPrimary.opacity(0.4))
                         .font(.subheadline)
                 }
@@ -245,15 +252,18 @@ struct CalendarView: View {
 
     private var upcomingSection: some View {
         let upcoming = calendarService.upcomingEvents.filter {
-            !Calendar.current.isDate($0.startDate, inSameDayAs: selectedDate)
-        }.prefix(7)
+            !Calendar.autoupdatingCurrent.isDate($0.startDate, inSameDayAs: selectedDate)
+        }.prefix(10)
 
         return Group {
             if !upcoming.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Ближайшие события")
-                        .font(.headline)
-                        .foregroundStyle(AppColors.textPrimary)
+                    HStack {
+                        Text("Ближайшие события и праздники")
+                            .font(.headline)
+                            .foregroundStyle(AppColors.textPrimary)
+                        Spacer()
+                    }
 
                     ForEach(Array(upcoming)) { event in
                         CalendarEventRow(event: event, showDate: true)
@@ -269,31 +279,30 @@ struct CalendarView: View {
     // MARK: - Helpers
 
     private var selectedDayTitle: String {
-        let cal = Calendar.current
+        let cal = Calendar.autoupdatingCurrent
         if cal.isDateInToday(selectedDate) { return "Сегодня" }
         if cal.isDateInTomorrow(selectedDate) { return "Завтра" }
         if cal.isDateInYesterday(selectedDate) { return "Вчера" }
         let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
+        f.locale = Locale.autoupdatingCurrent
         f.dateFormat = "d MMMM"
         return f.string(from: selectedDate)
     }
 
     private func monthTitle(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
+        f.locale = Locale.autoupdatingCurrent
         f.dateFormat = "LLLL yyyy"
         return f.string(from: date).capitalized
     }
 
     private func daysInMonth(_ date: Date) -> [Date?] {
-        let cal = Calendar.current
+        let cal = Calendar.autoupdatingCurrent
         var comps = cal.dateComponents([.year, .month], from: date)
         comps.day = 1
         guard let firstDay = cal.date(from: comps),
               let range = cal.range(of: .day, in: .month, for: firstDay) else { return [] }
 
-        // weekday offset (Monday = 1)
         let weekday = cal.component(.weekday, from: firstDay)
         let offset = (weekday + 5) % 7 // Mon=0 … Sun=6
 
@@ -303,9 +312,221 @@ struct CalendarView: View {
                 days.append(day)
             }
         }
-        // pad to full rows
         while days.count % 7 != 0 { days.append(nil) }
         return days
+    }
+}
+
+// MARK: - Calendar Filter Sheet
+
+struct CalendarFilterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var calendarService = CalendarService.shared
+    @State private var showHolidaysList = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppColors.appBackground.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Quick Action Buttons
+                        HStack(spacing: 10) {
+                            Button {
+                                calendarService.selectOnlyKazakhstanHolidays()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text("🇰🇿")
+                                    Text("Только Казахстан")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(Color(hex: "00afca"))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+
+                            Button {
+                                calendarService.enableAllCalendars()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.circle")
+                                    Text("Включить всё")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .foregroundStyle(AppColors.textPrimary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 11)
+                                .background(AppColors.textPrimary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+
+                        // Section: Kazakhstan Holidays
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Праздники страны")
+                                .font(.caption)
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+
+                            VStack(spacing: 12) {
+                                HStack(spacing: 12) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color(hex: "00afca").opacity(0.15))
+                                            .frame(width: 38, height: 38)
+                                        Text("🇰🇿")
+                                            .font(.system(size: 20))
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Праздники Казахстана")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(AppColors.textPrimary)
+                                        Text("Наурыз, День Республики, День Независимости и др.")
+                                            .font(.caption2)
+                                            .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+                                    }
+
+                                    Spacer()
+
+                                    Toggle("", isOn: Binding(
+                                        get: { calendarService.showKazakhstanHolidays },
+                                        set: { calendarService.setKazakhstanHolidays(enabled: $0) }
+                                    ))
+                                    .labelsHidden()
+                                    .tint(Color(hex: "00afca"))
+                                }
+
+                                Divider().opacity(0.15)
+
+                                Button {
+                                    withAnimation { showHolidaysList.toggle() }
+                                } label: {
+                                    HStack {
+                                        Text("Все праздники Казахстана на год")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(Color(hex: "00afca"))
+                                        Spacer()
+                                        Image(systemName: showHolidaysList ? "chevron.up" : "chevron.down")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(Color(hex: "00afca"))
+                                    }
+                                }
+
+                                if showHolidaysList {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        ForEach(calendarService.currentYearKazakhstanHolidays) { holiday in
+                                            HStack {
+                                                Text(holiday.title)
+                                                    .font(.system(size: 13))
+                                                    .foregroundStyle(AppColors.textPrimary.opacity(0.85))
+                                                Spacer()
+                                                Text(holiday.startDate.shortFormatted)
+                                                    .font(.system(size: 12, weight: .semibold))
+                                                    .foregroundStyle(Color(hex: "00afca"))
+                                            }
+                                            .padding(.vertical, 2)
+                                        }
+                                    }
+                                    .padding(.top, 4)
+                                }
+                            }
+                            .padding(14)
+                            .background(AppColors.textPrimary.opacity(0.05))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                        }
+
+                        // Section: Phone Calendars
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Календари в телефоне")
+                                    .font(.caption)
+                                    .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                                Spacer()
+                                if !calendarService.isAuthorized {
+                                    Button("Разрешить доступ") {
+                                        Task { await calendarService.requestAccess() }
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Color(hex: "667eea"))
+                                }
+                            }
+
+                            if calendarService.availableCalendars.isEmpty {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "calendar.badge.exclamationmark")
+                                        .foregroundStyle(AppColors.textPrimary.opacity(0.3))
+                                    Text("Календари телефона не подключены")
+                                        .font(.subheadline)
+                                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                                }
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(AppColors.textPrimary.opacity(0.04))
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                            } else {
+                                VStack(spacing: 8) {
+                                    ForEach(calendarService.availableCalendars) { source in
+                                        let isEnabled = !calendarService.disabledCalendarIDs.contains(source.id)
+                                        Button {
+                                            calendarService.toggleCalendar(id: source.id)
+                                        } label: {
+                                            HStack(spacing: 12) {
+                                                Circle()
+                                                    .fill(source.color)
+                                                    .frame(width: 12, height: 12)
+
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(source.title)
+                                                        .font(.subheadline.weight(.medium))
+                                                        .foregroundStyle(AppColors.textPrimary)
+                                                    Text(source.accountName)
+                                                        .font(.caption2)
+                                                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                                                }
+
+                                                Spacer()
+
+                                                Image(systemName: isEnabled ? "checkmark.circle.fill" : "circle")
+                                                    .font(.system(size: 22))
+                                                    .foregroundStyle(isEnabled ? Color(hex: "667eea") : AppColors.textPrimary.opacity(0.2))
+                                            }
+                                            .padding(12)
+                                            .background(AppColors.textPrimary.opacity(0.04))
+                                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Info hint
+                        HStack(spacing: 8) {
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(Color(hex: "00afca"))
+                            Text("Праздники России автоматически отключены. При выборе «Только Казахстан» отображаются государственные праздники РК.")
+                                .font(.caption)
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.55))
+                        }
+                        .padding(12)
+                        .background(Color(hex: "00afca").opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Настройка календарей")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Готово") { dismiss() }
+                        .foregroundStyle(Color(hex: "667eea"))
+                }
+            }
+        }
     }
 }
 
@@ -338,7 +559,7 @@ private struct CalendarDayCell: View {
                             .frame(width: 32, height: 32)
                     }
 
-                    Text("\(Calendar.current.component(.day, from: date))")
+                    Text("\(Calendar.autoupdatingCurrent.component(.day, from: date))")
                         .font(.system(size: 14, weight: isToday || isSelected ? .semibold : .regular))
                         .foregroundStyle(
                             isSelected
@@ -351,7 +572,7 @@ private struct CalendarDayCell: View {
                 .frame(width: 34, height: 34)
 
                 Circle()
-                    .fill(isSelected ? Color.white.opacity(0.7) : Color(hex: "667eea"))
+                    .fill(isSelected ? Color.white.opacity(0.7) : Color(hex: "00afca"))
                     .frame(width: 4, height: 4)
                     .opacity(hasEvents ? 1 : 0)
             }
@@ -376,16 +597,23 @@ struct CalendarEventRow: View {
                 .frame(height: showDate ? 52 : 44)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(event.title)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(AppColors.textPrimary)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(event.title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(AppColors.textPrimary)
+                        .lineLimit(1)
+
+                    if event.isNationalHoliday {
+                        Text("🇰🇿")
+                            .font(.caption2)
+                    }
+                }
 
                 HStack(spacing: 8) {
                     if showDate {
                         Text(shortDate(event.startDate))
                             .font(.caption)
-                            .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.5))
                     }
 
                     HStack(spacing: 4) {
@@ -409,19 +637,27 @@ struct CalendarEventRow: View {
                 }
 
                 Text(event.calendarTitle)
-                    .font(.system(size: 10))
-                    .foregroundStyle(event.calendarColor.opacity(0.8))
+                    .font(.system(size: 10, weight: event.isNationalHoliday ? .semibold : .regular))
+                    .foregroundStyle(event.calendarColor)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(event.calendarColor.opacity(0.15))
+                    .background(event.calendarColor.opacity(0.12))
                     .clipShape(Capsule())
             }
 
             Spacer()
         }
         .padding(12)
-        .background(AppColors.textPrimary.opacity(0.04))
+        .background(
+            event.isNationalHoliday
+                ? Color(hex: "00afca").opacity(0.06)
+                : AppColors.textPrimary.opacity(0.04)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(event.isNationalHoliday ? Color(hex: "00afca").opacity(0.2) : Color.clear, lineWidth: 1)
+        )
     }
 
     private func timeRange(_ start: Date, _ end: Date) -> String {
@@ -432,7 +668,7 @@ struct CalendarEventRow: View {
 
     private func shortDate(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "ru_RU")
+        f.locale = Locale.autoupdatingCurrent
         f.dateFormat = "d MMM"
         return f.string(from: date)
     }
@@ -459,7 +695,7 @@ struct CreateEventSheet: View {
     init(selectedDate: Date, onCreated: @escaping () -> Void) {
         self.selectedDate = selectedDate
         self.onCreated = onCreated
-        let cal = Calendar.current
+        let cal = Calendar.autoupdatingCurrent
         let start = cal.date(bySettingHour: cal.component(.hour, from: Date()), minute: 0, second: 0, of: selectedDate) ?? selectedDate
         _startDate = State(initialValue: start)
         _endDate = State(initialValue: start.addingTimeInterval(3600))
@@ -571,10 +807,11 @@ struct CreateEventSheet: View {
     private func save() {
         isSaving = true
         Task {
+            let cal = Calendar.autoupdatingCurrent
             let success = await calendarService.createEvent(
                 title: title,
-                startDate: isAllDay ? Calendar.current.startOfDay(for: startDate) : startDate,
-                endDate: isAllDay ? Calendar.current.startOfDay(for: endDate) : endDate,
+                startDate: isAllDay ? cal.startOfDay(for: startDate) : startDate,
+                endDate: isAllDay ? cal.startOfDay(for: endDate) : endDate,
                 isAllDay: isAllDay,
                 notes: notes.isEmpty ? nil : notes,
                 location: location.isEmpty ? nil : location
@@ -616,8 +853,4 @@ private struct DateRow: View {
         }
         .padding(14)
     }
-}
-
-#Preview {
-    CalendarView()
 }
