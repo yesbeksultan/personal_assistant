@@ -1,41 +1,108 @@
 import SwiftUI
 import SwiftData
 
-// MARK: - Performance Cache for Parsed Markdown
+// MARK: - Message Chunks & High-Performance Parser
 
-private final class MarkdownCache {
-    static let shared = MarkdownCache()
-    private let cache = NSCache<NSString, NSAttributedString>()
+enum MessageChunk: Identifiable, Hashable {
+    case text(id: String, content: String)
+    case code(id: String, language: String?, code: String)
+    
+    var id: String {
+        switch self {
+        case .text(let id, _): return id
+        case .code(let id, _, _): return id
+        }
+    }
+}
+
+private final class MessageChunkWrapper: NSObject {
+    let chunk: MessageChunk
+    init(_ chunk: MessageChunk) {
+        self.chunk = chunk
+    }
+}
+
+final class AIMessageParser {
+    static let shared = AIMessageParser()
+    private let cache = NSCache<NSString, NSArray>()
     
     private init() {
         cache.countLimit = 400
     }
     
-    func attributed(from markdown: String) -> AttributedString {
-        let key = markdown as NSString
+    func chunks(from raw: String) -> [MessageChunk] {
+        let key = raw as NSString
+        if let cached = cache.object(forKey: key) as? [MessageChunkWrapper] {
+            return cached.map { $0.chunk }
+        }
+        
+        let parsed = parse(raw)
+        let wrapped = parsed.map { MessageChunkWrapper($0) } as NSArray
+        cache.setObject(wrapped, forKey: key)
+        return parsed
+    }
+    
+    private func parse(_ raw: String) -> [MessageChunk] {
+        let parts = raw.components(separatedBy: "```")
+        if parts.count == 1 {
+            return [.text(id: "0", content: raw)]
+        }
+        
+        var chunks: [MessageChunk] = []
+        for (index, part) in parts.enumerated() {
+            if index % 2 == 0 {
+                let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    chunks.append(.text(id: "t_\(index)", content: trimmed))
+                }
+            } else {
+                var lines = part.components(separatedBy: .newlines)
+                var lang: String? = nil
+                if let first = lines.first?.trimmingCharacters(in: .whitespaces), !first.isEmpty, !first.contains(" ") {
+                    lang = first
+                    lines.removeFirst()
+                }
+                let code = lines.joined(separator: "\n").trimmingCharacters(in: .newlines)
+                chunks.append(.code(id: "c_\(index)", language: lang, code: code))
+            }
+        }
+        return chunks
+    }
+}
+
+// MARK: - Performance Cache for Parsed Markdown
+
+final class MarkdownCache {
+    static let shared = MarkdownCache()
+    private let cache = NSCache<NSString, NSAttributedString>()
+    
+    private init() {
+        cache.countLimit = 500
+    }
+    
+    func attributed(from text: String) -> AttributedString {
+        let key = text as NSString
         if let cached = cache.object(forKey: key) {
             return AttributedString(cached)
         }
         
-        let parsed: AttributedString
         do {
-            parsed = try AttributedString(
-                markdown: markdown,
-                options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace,
-                    failurePolicy: .returnPartiallyParsedIfPossible
-                )
-            )
+            var options = AttributedString.MarkdownParsingOptions()
+            options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+            options.failurePolicy = .returnPartiallyParsedIfPossible
+            
+            let parsed = try AttributedString(markdown: text, options: options)
+            cache.setObject(NSAttributedString(parsed), forKey: key)
+            return parsed
         } catch {
-            parsed = AttributedString(markdown)
+            let fallback = AttributedString(text)
+            cache.setObject(NSAttributedString(fallback), forKey: key)
+            return fallback
         }
-        
-        cache.setObject(NSAttributedString(parsed), forKey: key)
-        return parsed
     }
 }
 
-// MARK: - Fast Date Formatters
+// MARK: - Fast Time Formatter
 
 private enum ChatTimeFormatters {
     static let shortTime: DateFormatter = {
@@ -51,7 +118,7 @@ private enum ChatTimeFormatters {
     }
 }
 
-// MARK: - Chat List
+// MARK: - Chat Sessions List View
 
 struct ChatView: View {
     @Query(sort: \ChatSession.createdAt, order: .reverse) private var sessions: [ChatSession]
@@ -76,7 +143,7 @@ struct ChatView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: createNewSession) {
                         Image(systemName: "square.and.pencil")
-                            .font(.system(size: 17, weight: .regular))
+                            .font(.system(size: 15, weight: .regular))
                             .foregroundStyle(AppColors.textPrimary.opacity(0.65))
                     }
                 }
@@ -90,36 +157,49 @@ struct ChatView: View {
         }
     }
 
-    // MARK: - Empty State
+    // MARK: - Minimalist Empty State
 
     private var emptyChatState: some View {
-        VStack(spacing: 28) {
+        VStack(spacing: 18) {
             Spacer()
 
-            Image(systemName: "message")
-                .font(.system(size: 52, weight: .thin))
-                .foregroundStyle(AppColors.textPrimary.opacity(0.18))
+            ZStack {
+                Circle()
+                    .fill(Color(hex: "667eea").opacity(0.1))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(Color(hex: "667eea"))
+            }
 
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 Text("Привет! Я Friday")
-                    .font(.title2).fontWeight(.semibold)
+                    .font(.title3).fontWeight(.semibold)
                     .foregroundStyle(AppColors.textPrimary)
-                Text("Начни новый чат и я помогу\nс задачами, финансами и не только")
+                Text("Твой персональный AI-ассистент.\nПомогу спланировать день, рассчитать бюджет\nи ответить на любые вопросы.")
                     .font(.subheadline)
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.45))
                     .multilineTextAlignment(.center)
             }
 
             Button(action: createNewSession) {
-                Text("Новый чат")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.75))
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 11)
-                    .overlay(
-                        Capsule()
-                            .stroke(AppColors.textPrimary.opacity(0.18), lineWidth: 1)
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Начать диалог")
+                        .font(.subheadline.weight(.medium))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(
+                    LinearGradient(
+                        colors: [Color(hex: "667eea"), Color(hex: "764ba2")],
+                        startPoint: .leading,
+                        endPoint: .trailing
                     )
+                )
+                .clipShape(Capsule())
             }
 
             Spacer()
@@ -127,17 +207,15 @@ struct ChatView: View {
         .padding(.horizontal, 32)
     }
 
-    // MARK: - Session List
-
     private var sessionList: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: 10) {
                 ForEach(sessions) { session in
                     SessionCard(session: session) {
                         newSession = nil
                         selectedSession = session
                     } onDelete: {
-                        withAnimation(.spring(response: 0.4)) {
+                        withAnimation(.spring(response: 0.35)) {
                             modelContext.delete(session)
                         }
                     }
@@ -148,7 +226,6 @@ struct ChatView: View {
             .padding(.bottom, 80)
         }
         .scrollDismissesKeyboard(.interactively)
-        .animation(.easeInOut(duration: 0.3), value: sessions.count)
     }
 
     private func createNewSession() {
@@ -158,23 +235,7 @@ struct ChatView: View {
     }
 }
 
-// MARK: - Session Card
-
-private struct SessionCardButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(AppColors.textPrimary.opacity(configuration.isPressed ? 0.1 : 0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(AppColors.textPrimary.opacity(0.06), lineWidth: 1)
-            )
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-    }
-}
+// MARK: - Minimalist Session Card
 
 private struct SessionCard: View, Equatable {
     let session: ChatSession
@@ -190,26 +251,21 @@ private struct SessionCard: View, Equatable {
 
     private var messageCount: Int { session.messages?.count ?? 0 }
 
-    private var sessionInitial: String {
-        String(session.title.prefix(1)).uppercased()
-    }
-
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 14) {
-                // Аватар чата
+            HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(AppColors.textPrimary.opacity(0.06))
-                        .frame(width: 42, height: 42)
-                    Text(sessionInitial)
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(hex: "667eea").opacity(0.1))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "bubble.left.and.text.bubble.right")
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(Color(hex: "667eea").opacity(0.85))
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(session.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(AppColors.textPrimary)
                         .lineLimit(1)
 
@@ -217,7 +273,7 @@ private struct SessionCard: View, Equatable {
                         if messageCount > 0 {
                             Text("\(messageCount) сообщ.")
                                 .font(.caption2)
-                                .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.45))
                         } else {
                             Text("Нет сообщений")
                                 .font(.caption2)
@@ -228,18 +284,25 @@ private struct SessionCard: View, Equatable {
                             .foregroundStyle(AppColors.textPrimary.opacity(0.3))
                         Text(session.createdAt.chatFormatted)
                             .font(.caption2)
-                            .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.45))
                     }
                 }
 
                 Spacer(minLength: 0)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.2))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.18))
             }
+            .padding(12)
+            .background(AppColors.textPrimary.opacity(0.03))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(AppColors.textPrimary.opacity(0.05), lineWidth: 1)
+            )
         }
-        .buttonStyle(SessionCardButtonStyle())
+        .buttonStyle(.plain)
         .contextMenu {
             Button(role: .destructive, action: onDelete) {
                 Label("Удалить чат", systemImage: "trash")
@@ -253,14 +316,12 @@ private struct SessionCard: View, Equatable {
     }
 }
 
-// MARK: - Chat Detail
+// MARK: - Chat Detail View
 
 struct ChatDetailView: View {
     let session: ChatSession
     let isNew: Bool
     
-    // Performance: Only query messages belonging to this session.
-    // Tasks and transactions are fetched on-demand in ChatViewModel without reactive query overhead.
     @Query private var messages: [ChatMessage]
     
     @Environment(\.modelContext) private var modelContext
@@ -270,7 +331,6 @@ struct ChatDetailView: View {
     @FocusState private var isInputFocused: Bool
     @State private var showRenameAlert = false
     @State private var newChatTitle = ""
-    @State private var showFunctionPicker = false
 
     init(session: ChatSession, isNew: Bool = false) {
         self.session = session
@@ -287,11 +347,7 @@ struct ChatDetailView: View {
             AppColors.appBackground.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                if messages.isEmpty {
-                    welcomeView
-                } else {
-                    messagesList
-                }
+                messagesScrollView
                 inputBar
             }
         }
@@ -327,8 +383,8 @@ struct ChatDetailView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.7))
+                        .font(.system(size: 16))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.65))
                 }
             }
         }
@@ -337,7 +393,6 @@ struct ChatDetailView: View {
             newChatTitle = session.title
         }
         .onDisappear {
-            // Если чат новый и пустой — удаляем без сохранения
             if isNew && messages.isEmpty {
                 modelContext.delete(session)
             }
@@ -352,81 +407,29 @@ struct ChatDetailView: View {
         }
     }
 
-    // MARK: - Welcome
+    // MARK: - Messages Scroll View
 
-    private var welcomeView: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                Spacer(minLength: 30)
+    private var messagesScrollView: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if messages.isEmpty {
+                        welcomeSection
+                    } else {
+                        ForEach(messages, id: \.id) { message in
+                            ChatMessageRow(message: message)
+                                .id(message.id)
+                        }
 
-                // AI Avatar
-                Image(systemName: "sparkles")
-                    .font(.system(size: 48, weight: .thin))
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.2))
-
-                VStack(spacing: 8) {
-                    Text("Привет! Я Friday")
-                        .font(.title2).fontWeight(.semibold)
-                        .foregroundStyle(AppColors.textPrimary)
-                    Text("Твой персональный AI-ассистент.\nСпроси что угодно!")
-                        .font(.subheadline)
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
-                        .multilineTextAlignment(.center)
-                }
-
-                // Quick actions
-                VStack(spacing: 10) {
-                    ForEach(quickActions, id: \.self) { action in
-                        QuickActionButton(text: action) {
-                            viewModel.messageText = action
-                            Task {
-                                await viewModel.sendMessage(
-                                    context: modelContext,
-                                    messages: messages,
-                                    events: calendarService.upcomingEvents
-                                )
-                            }
+                        if viewModel.isLoading {
+                            TypingIndicator()
+                                .id("typingIndicator")
+                                .padding(.top, 2)
                         }
                     }
                 }
-                .padding(.horizontal, 20)
-
-                Spacer(minLength: 20)
-            }
-            .padding(.bottom, 60)
-        }
-        .scrollDismissesKeyboard(.interactively)
-    }
-
-    private var quickActions: [String] {
-        [
-            "Какие задачи мне стоит сделать сегодня?",
-            "Дай совет по экономии денег",
-            "Подведи итоги моего дня",
-            "Помоги составить план на завтра"
-        ]
-    }
-
-    // MARK: - Messages (High-Performance Virtualized List)
-
-    private var messagesList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(messages, id: \.id) { message in
-                        MessageBubble(message: message)
-                            .id(message.id)
-                    }
-
-                    if viewModel.isLoading {
-                        TypingIndicator()
-                            .id("typingIndicator")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-                    }
-                }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
@@ -439,13 +442,13 @@ struct ChatDetailView: View {
             }
             .onChange(of: messages.count) { _, _ in
                 if let last = messages.last {
-                    withAnimation(.easeOut(duration: 0.22)) {
+                    withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
             .onChange(of: viewModel.isLoading) { _, loading in
-                withAnimation(.easeOut(duration: 0.22)) {
+                withAnimation(.easeOut(duration: 0.2)) {
                     if loading {
                         proxy.scrollTo("typingIndicator", anchor: .bottom)
                     } else if let last = messages.last {
@@ -456,7 +459,7 @@ struct ChatDetailView: View {
             .onChange(of: isInputFocused) { _, focused in
                 if focused, let last = messages.last {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                        withAnimation(.easeOut(duration: 0.22)) {
+                        withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }
@@ -465,281 +468,253 @@ struct ChatDetailView: View {
         }
     }
 
-    // MARK: - Input Bar
+    // MARK: - Minimalist Welcome Section
+
+    private var welcomeSection: some View {
+        VStack(spacing: 20) {
+            Spacer(minLength: 24)
+
+            ZStack {
+                Circle()
+                    .fill(Color(hex: "667eea").opacity(0.12))
+                    .frame(width: 44, height: 44)
+
+                Image(systemName: "sparkles")
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(hex: "667eea"), Color(hex: "764ba2")],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+
+            VStack(spacing: 4) {
+                Text("Привет! Я Friday")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(AppColors.textPrimary)
+
+                Text("Твой персональный AI-ассистент.\nПомогу с задачами, финансами и расписанием.")
+                    .font(.subheadline)
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+                    .multilineTextAlignment(.center)
+            }
+
+            // Suggestions Grid
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                suggestionCard(
+                    icon: "calendar",
+                    color: "4facfe",
+                    title: "План на день",
+                    prompt: "Какие задачи и события у меня запланированы на сегодня?"
+                )
+
+                suggestionCard(
+                    icon: "chart.bar.fill",
+                    color: "43e97b",
+                    title: "Анализ финансов",
+                    prompt: "Проанализируй мои расходы за последнее время и дай полезные советы."
+                )
+
+                suggestionCard(
+                    icon: "checkmark.circle.fill",
+                    color: "667eea",
+                    title: "Приоритеты дел",
+                    prompt: "Помоги расставить приоритеты по моим открытым задачам."
+                )
+
+                suggestionCard(
+                    icon: "moon.stars.fill",
+                    color: "fa709a",
+                    title: "Итоги дня",
+                    prompt: "Подведи краткие итоги дня по моим задачам и тратам."
+                )
+            }
+            .padding(.top, 4)
+
+            Spacer(minLength: 24)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func suggestionCard(icon: String, color: String, title: String, prompt: String) -> some View {
+        Button {
+            viewModel.messageText = prompt
+            sendMessage()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(hex: color))
+                    .frame(width: 22, height: 22)
+                    .background(Color(hex: color).opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.85))
+                    .lineLimit(1)
+
+                Spacer(minLength: 2)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.25))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(AppColors.textPrimary.opacity(0.035))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(AppColors.textPrimary.opacity(0.05), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Minimalist Input Bar
 
     private var inputBar: some View {
-        VStack(spacing: 0) {
-            Divider().opacity(0.1)
-
-            // Active function chip
+        VStack(spacing: 4) {
+            // Active context chip
             if let fn = viewModel.activeFunction {
-                activeFunctionChip(fn)
-            }
+                HStack(spacing: 6) {
+                    Text(fn.emoji)
+                        .font(.system(size: 11))
+                    Text(fn.rawValue)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AppColors.textPrimary)
 
-            // Period picker row (when finance active)
-            if viewModel.activeFunction == .finance {
-                periodPickerRow
-            }
+                    if let p = viewModel.selectedPeriod {
+                        Text("(\(p.rawValue.lowercased()))")
+                            .font(.system(size: 10))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.55))
+                    }
 
-            HStack(spacing: 8) {
-                // Function picker button
-                Button {
-                    withAnimation(.spring(response: 0.35)) {
-                        if viewModel.activeFunction != nil {
+                    Spacer()
+
+                    Button {
+                        withAnimation(.spring(response: 0.25)) {
                             viewModel.clearActiveFunction()
-                            showFunctionPicker = false
-                        } else {
-                            showFunctionPicker.toggle()
-                            isInputFocused = false
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color(hex: "667eea").opacity(0.12))
+                .clipShape(Capsule())
+                .padding(.horizontal, 14)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                // Minimalist Context (+) Menu Button
+                Menu {
+                    Button {
+                        withAnimation(.spring(response: 0.25)) {
+                            viewModel.activeFunction = .calendar
+                        }
+                    } label: {
+                        Label("Календарь (события и праздники)", systemImage: "calendar")
+                    }
+
+                    Menu("Финансы (баланс и транзакции)") {
+                        ForEach(FinancePeriod.allCases, id: \.self) { period in
+                            Button("За \(period.rawValue.lowercased())") {
+                                withAnimation(.spring(response: 0.25)) {
+                                    viewModel.activeFunction = .finance
+                                    viewModel.selectedPeriod = period
+                                }
+                            }
                         }
                     }
                 } label: {
-                    let isActive = viewModel.activeFunction != nil
                     ZStack {
                         Circle()
-                            .fill(isActive
-                                ? AppColors.textPrimary.opacity(0.18)
-                                : AppColors.textPrimary.opacity(0.07))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: isActive ? "xmark" : "plus")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(isActive
-                                ? AppColors.textPrimary.opacity(0.8)
-                                : AppColors.textPrimary.opacity(0.45))
-                            .rotationEffect(.degrees(showFunctionPicker && !isActive ? 45 : 0))
+                            .fill(viewModel.activeFunction != nil ? Color(hex: "667eea").opacity(0.18) : AppColors.textPrimary.opacity(0.06))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: viewModel.activeFunction != nil ? "checkmark" : "plus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(viewModel.activeFunction != nil ? Color(hex: "667eea") : AppColors.textPrimary.opacity(0.6))
                     }
                 }
 
+                // Text Input Field
                 TextField("Спроси Friday...", text: $viewModel.messageText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .foregroundStyle(AppColors.textPrimary)
                     .lineLimit(1...5)
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(AppColors.textPrimary.opacity(0.07))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                    .stroke(AppColors.textPrimary.opacity(0.1), lineWidth: 1)
-                            )
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(AppColors.textPrimary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(AppColors.textPrimary.opacity(0.07), lineWidth: 1)
                     )
                     .focused($isInputFocused)
 
-                // Send button
-                Button {
-                    Task {
-                        await viewModel.sendMessage(
-                            context: modelContext,
-                            messages: messages,
-                            events: calendarService.upcomingEvents
-                        )
-                    }
-                    isInputFocused = false
-                } label: {
-                    let active = !viewModel.messageText.isEmpty && !viewModel.isLoading
-                    Circle()
-                        .fill(active ? AppColors.textPrimary.opacity(0.14) : AppColors.textPrimary.opacity(0.06))
-                        .frame(width: 38, height: 38)
-                        .overlay(
+                // Send or Loading Button
+                if viewModel.isLoading {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.75)
+                        .frame(width: 32, height: 32)
+                } else {
+                    let hasText = !viewModel.messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    Button {
+                        sendMessage()
+                    } label: {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    hasText
+                                        ? AnyShapeStyle(LinearGradient(colors: [Color(hex: "667eea"), Color(hex: "764ba2")], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                        : AnyShapeStyle(AppColors.textPrimary.opacity(0.05))
+                                )
+                                .frame(width: 32, height: 32)
                             Image(systemName: "arrow.up")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(active ? AppColors.textPrimary.opacity(0.8) : AppColors.textPrimary.opacity(0.25))
-                        )
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(hasText ? Color.white : AppColors.textPrimary.opacity(0.25))
+                        }
+                    }
+                    .disabled(!hasText)
+                    .animation(.spring(response: 0.25), value: hasText)
                 }
-                .disabled(viewModel.messageText.isEmpty || viewModel.isLoading)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 6)
             .background(AppColors.appBackground)
-
-            // Function picker popup
-            if showFunctionPicker && viewModel.activeFunction == nil {
-                functionPickerPopup
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
         }
     }
 
-    // MARK: - Active Function Chip
-
-    private func activeFunctionChip(_ fn: ChatFunction) -> some View {
-        HStack(spacing: 6) {
-            Text(fn.emoji)
-                .font(.system(size: 13))
-            Text(fn.rawValue)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(AppColors.textPrimary.opacity(0.75))
-            if let period = viewModel.selectedPeriod {
-                Text("· \(period.rawValue)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.45))
-            }
-            Spacer()
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(AppColors.textPrimary.opacity(0.35))
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(AppColors.textPrimary.opacity(0.07))
-        )
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
-    }
-
-    // MARK: - Period Picker Row
-
-    private var periodPickerRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(FinancePeriod.allCases, id: \.self) { period in
-                    let isSelected = viewModel.selectedPeriod == period
-                    Button {
-                        withAnimation(.spring(response: 0.3)) {
-                            viewModel.selectedPeriod = isSelected ? nil : period
-                        }
-                    } label: {
-                        Text(period.rawValue)
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected
-                                ? AppColors.textPrimary
-                                : AppColors.textPrimary.opacity(0.5))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule()
-                                    .fill(isSelected
-                                        ? AppColors.textPrimary.opacity(0.14)
-                                        : AppColors.textPrimary.opacity(0.06))
-                            )
-                            .overlay(
-                                Capsule()
-                                    .stroke(isSelected
-                                        ? AppColors.textPrimary.opacity(0.25)
-                                        : Color.clear, lineWidth: 1)
-                            )
-                    }
-                }
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-        .transition(.opacity.combined(with: .move(edge: .top)))
-    }
-
-    // MARK: - Function Picker Popup
-
-    private var functionPickerPopup: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Контекст для ассистента")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(AppColors.textPrimary.opacity(0.4))
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-
-            ForEach(ChatFunction.allCases) { fn in
-                Button {
-                    withAnimation(.spring(response: 0.35)) {
-                        viewModel.activeFunction = fn
-                        showFunctionPicker = false
-                        viewModel.selectedPeriod = .week
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(AppColors.textPrimary.opacity(0.08))
-                                .frame(width: 34, height: 34)
-                            Image(systemName: fn.icon)
-                                .font(.system(size: 15))
-                                .foregroundStyle(AppColors.textPrimary.opacity(0.6))
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(fn.rawValue)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(AppColors.textPrimary)
-                            Text(fn.description)
-                                .font(.system(size: 12))
-                                .foregroundStyle(AppColors.textPrimary.opacity(0.4))
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(AppColors.textPrimary.opacity(0.2))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .contentShape(Rectangle())
-                }
-            }
-
-            Spacer(minLength: 8)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(AppColors.appBackground)
-                .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: -4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(AppColors.textPrimary.opacity(0.07), lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
-    }
-}
-
-// MARK: - Quick Action Button
-
-private struct QuickActionButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(AppColors.textPrimary.opacity(configuration.isPressed ? 0.1 : 0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(AppColors.textPrimary.opacity(0.07), lineWidth: 1)
-                    )
+    private func sendMessage() {
+        let text = viewModel.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let events = calendarService.upcomingEvents
+        Task {
+            await viewModel.sendMessage(
+                context: modelContext,
+                messages: messages,
+                events: events
             )
-            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-    }
-}
-
-private struct QuickActionButton: View {
-    let text: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Text(text)
-                    .font(.subheadline)
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.85))
-                    .multilineTextAlignment(.leading)
-                Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.3))
-            }
         }
-        .buttonStyle(QuickActionButtonStyle())
+        isInputFocused = false
     }
 }
 
-// MARK: - Optimized Equatable Message Bubble
+// MARK: - Chat Message Row (Equatable Router)
 
-struct MessageBubble: View, Equatable {
+struct ChatMessageRow: View, Equatable {
     let message: ChatMessage
 
-    static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
+    static func == (lhs: ChatMessageRow, rhs: ChatMessageRow) -> Bool {
         lhs.message.id == rhs.message.id &&
         lhs.message.content == rhs.message.content &&
         lhs.message.isFromUser == rhs.message.isFromUser &&
@@ -747,136 +722,263 @@ struct MessageBubble: View, Equatable {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            if message.isFromUser {
-                Spacer(minLength: 60)
-                userBubble
-            } else {
-                aiBubble
-                Spacer(minLength: 60)
-            }
-        }
-        .padding(.horizontal, 12)
-    }
-
-    private var userBubble: some View {
-        VStack(alignment: .trailing, spacing: 3) {
-            Text(message.content)
-                .font(.subheadline)
-                .foregroundStyle(AppColors.textPrimary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(AppColors.textPrimary.opacity(0.1))
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 18,
-                        bottomLeadingRadius: 18,
-                        bottomTrailingRadius: 4,
-                        topTrailingRadius: 18,
-                        style: .continuous
-                    )
-                )
-                .textSelection(.enabled)
-
-            Text(ChatTimeFormatters.format(message.timestamp))
-                .font(.system(size: 10))
-                .foregroundStyle(AppColors.textPrimary.opacity(0.3))
-                .padding(.trailing, 2)
+        if message.isFromUser {
+            UserMessageBubble(message: message)
+        } else {
+            AIMessageBubble(message: message)
         }
     }
+}
 
-    private var aiBubble: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Circle()
-                .fill(AppColors.textPrimary.opacity(0.07))
-                .frame(width: 24, height: 24)
-                .overlay(
-                    Text("F")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
-                )
+// MARK: - Redesigned User Message Bubble
 
-            VStack(alignment: .leading, spacing: 3) {
-                // Cached markdown parser — 0ms on scroll
-                Text(MarkdownCache.shared.attributed(from: message.content))
+struct UserMessageBubble: View {
+    let message: ChatMessage
+
+    var body: some View {
+        HStack {
+            Spacer(minLength: 44)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(message.content)
                     .font(.subheadline)
-                    .foregroundStyle(AppColors.textPrimary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(AppColors.textPrimary.opacity(0.08))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(hex: "667eea"), Color(hex: "764ba2")],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .clipShape(
                         UnevenRoundedRectangle(
-                            topLeadingRadius: 18,
-                            bottomLeadingRadius: 4,
-                            bottomTrailingRadius: 18,
-                            topTrailingRadius: 18,
+                            topLeadingRadius: 16,
+                            bottomLeadingRadius: 16,
+                            bottomTrailingRadius: 4,
+                            topTrailingRadius: 16,
                             style: .continuous
                         )
                     )
                     .textSelection(.enabled)
-                    .contextMenu {
-                        Button {
-                            UIPasteboard.general.string = message.content
-                        } label: {
-                            Label("Скопировать", systemImage: "doc.on.doc")
-                        }
-                    }
 
                 Text(ChatTimeFormatters.format(message.timestamp))
                     .font(.system(size: 10))
                     .foregroundStyle(AppColors.textPrimary.opacity(0.3))
-                    .padding(.leading, 2)
+                    .padding(.trailing, 2)
+            }
+        }
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = message.content
+            } label: {
+                Label("Скопировать", systemImage: "doc.on.doc")
             }
         }
     }
 }
 
-// MARK: - Typing Indicator
+// MARK: - Minimalist AI Message Bubble
 
-private struct TypingIndicator: View {
-    @State private var animating = false
+struct AIMessageBubble: View {
+    let message: ChatMessage
+    @State private var copied = false
+
+    private var chunks: [MessageChunk] {
+        AIMessageParser.shared.chunks(from: message.content)
+    }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Circle()
-                .fill(AppColors.textPrimary.opacity(0.07))
-                .frame(width: 24, height: 24)
-                .overlay(
-                    Text("F")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
-                )
-
-            HStack(spacing: 5) {
-                ForEach(0..<3, id: \.self) { i in
+        VStack(alignment: .leading, spacing: 5) {
+            // Minimalist AI Header
+            HStack(spacing: 6) {
+                ZStack {
                     Circle()
-                        .fill(AppColors.textPrimary.opacity(0.5))
-                        .frame(width: 7, height: 7)
-                        .scaleEffect(animating ? 1.25 : 0.75)
-                        .opacity(animating ? 1.0 : 0.4)
-                        .animation(
-                            .easeInOut(duration: 0.5)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(i) * 0.18),
-                            value: animating
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(hex: "667eea"), Color(hex: "764ba2")],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
+                        .frame(width: 17, height: 17)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+
+                Text("Friday")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AppColors.textPrimary)
+
+                Text(ChatTimeFormatters.format(message.timestamp))
+                    .font(.system(size: 10))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.3))
+
+                Spacer()
+
+                Button {
+                    UIPasteboard.general.string = message.content
+                    withAnimation { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        withAnimation { copied = false }
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundStyle(copied ? Color(hex: "43e97b") : AppColors.textPrimary.opacity(0.35))
+                        .padding(3)
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Structured Content Card (Single Text View for fluid typography)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(chunks) { chunk in
+                    switch chunk {
+                    case .text(_, let text):
+                        Text(MarkdownCache.shared.attributed(from: text))
+                            .font(.subheadline)
+                            .lineSpacing(3)
+                            .foregroundStyle(AppColors.textPrimary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                    case .code(_, let language, let code):
+                        AICodeBlockView(language: language, code: code)
+                    }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(AppColors.textPrimary.opacity(0.08))
-            .clipShape(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: 18,
-                    bottomLeadingRadius: 4,
-                    bottomTrailingRadius: 18,
-                    topTrailingRadius: 18,
-                    style: .continuous
-                )
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .background(AppColors.textPrimary.opacity(0.035))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(AppColors.textPrimary.opacity(0.05), lineWidth: 1)
             )
         }
-        .onAppear { animating = true }
-        .onDisappear { animating = false }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 24)
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = message.content
+            } label: {
+                Label("Скопировать текст", systemImage: "doc.on.doc")
+            }
+        }
+    }
+}
+
+// MARK: - Minimalist Code Block View
+
+struct AICodeBlockView: View {
+    let language: String?
+    let code: String
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text((language ?? "КОД").uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+
+                Spacer()
+
+                Button {
+                    UIPasteboard.general.string = code
+                    withAnimation { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                        withAnimation { copied = false }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(copied ? "Скопировано" : "Копировать")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(copied ? Color(hex: "43e97b") : AppColors.textPrimary.opacity(0.55))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(AppColors.textPrimary.opacity(0.05))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(code)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
+            }
+        }
+        .background(AppColors.textPrimary.opacity(0.035))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(AppColors.textPrimary.opacity(0.06), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Minimalist Typing Indicator
+
+struct TypingIndicator: View {
+    @State private var phase: Double = 0
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(hex: "667eea"), Color(hex: "764ba2")],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 17, height: 17)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+
+            HStack(spacing: 6) {
+                HStack(spacing: 3) {
+                    ForEach(0..<3, id: \.self) { index in
+                        Circle()
+                            .fill(Color(hex: "667eea"))
+                            .frame(width: 4.5, height: 4.5)
+                            .scaleEffect(phase == Double(index) ? 1.25 : 0.75)
+                            .opacity(phase == Double(index) ? 1.0 : 0.4)
+                    }
+                }
+
+                Text("Friday думает...")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(AppColors.textPrimary.opacity(0.035))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(AppColors.textPrimary.opacity(0.05), lineWidth: 1)
+            )
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: false)) {
+                phase = 2
+            }
+        }
     }
 }
 
