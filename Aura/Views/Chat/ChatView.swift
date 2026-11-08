@@ -504,31 +504,31 @@ struct ChatDetailView: View {
             // Suggestions Grid
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 suggestionCard(
+                    icon: "plus.circle.fill",
+                    color: "667eea",
+                    title: "Создать задачу",
+                    prompt: "Напомни завтра в 14:00 созвониться с врачом"
+                )
+
+                suggestionCard(
+                    icon: "creditcard.fill",
+                    color: "fa709a",
+                    title: "Записать расход",
+                    prompt: "Запиши расход 2500 тг на такси"
+                )
+
+                suggestionCard(
                     icon: "calendar",
                     color: "4facfe",
                     title: "План на день",
-                    prompt: "Какие задачи и события у меня запланированы на сегодня?"
+                    prompt: "Какие задачи запланированы на сегодня?"
                 )
 
                 suggestionCard(
                     icon: "chart.bar.fill",
                     color: "43e97b",
                     title: "Анализ финансов",
-                    prompt: "Проанализируй мои расходы за последнее время и дай полезные советы."
-                )
-
-                suggestionCard(
-                    icon: "checkmark.circle.fill",
-                    color: "667eea",
-                    title: "Приоритеты дел",
-                    prompt: "Помоги расставить приоритеты по моим открытым задачам."
-                )
-
-                suggestionCard(
-                    icon: "moon.stars.fill",
-                    color: "fa709a",
-                    title: "Итоги дня",
-                    prompt: "Подведи краткие итоги дня по моим задачам и тратам."
+                    prompt: "Проанализируй мои расходы за последнее время"
                 )
             }
             .padding(.top, 4)
@@ -785,8 +785,12 @@ struct AIMessageBubble: View {
     let message: ChatMessage
     @State private var copied = false
 
+    private var parsed: (cleanText: String, actions: [AIAction]) {
+        AIActionService.extractActions(from: message.content)
+    }
+
     private var chunks: [MessageChunk] {
-        AIMessageParser.shared.chunks(from: message.content)
+        AIMessageParser.shared.chunks(from: parsed.cleanText)
     }
 
     var body: some View {
@@ -819,7 +823,7 @@ struct AIMessageBubble: View {
                 Spacer()
 
                 Button {
-                    UIPasteboard.general.string = message.content
+                    UIPasteboard.general.string = parsed.cleanText
                     withAnimation { copied = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         withAnimation { copied = false }
@@ -838,16 +842,33 @@ struct AIMessageBubble: View {
                 ForEach(chunks) { chunk in
                     switch chunk {
                     case .text(_, let text):
-                        Text(MarkdownCache.shared.attributed(from: text))
-                            .font(.subheadline)
-                            .lineSpacing(3)
-                            .foregroundStyle(AppColors.textPrimary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if !text.isEmpty {
+                            Text(MarkdownCache.shared.attributed(from: text))
+                                .font(.subheadline)
+                                .lineSpacing(3)
+                                .foregroundStyle(AppColors.textPrimary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
 
                     case .code(_, let language, let code):
                         AICodeBlockView(language: language, code: code)
                     }
+                }
+
+                // Render Action Confirmation Cards (if Friday created a task or logged a transaction)
+                if !parsed.actions.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(parsed.actions.enumerated()), id: \.offset) { _, action in
+                            switch action {
+                            case .task(let payload):
+                                TaskActionCardView(payload: payload)
+                            case .transaction(let payload):
+                                TransactionActionCardView(payload: payload)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
                 }
             }
             .padding(.horizontal, 13)
@@ -863,11 +884,178 @@ struct AIMessageBubble: View {
         .padding(.trailing, 24)
         .contextMenu {
             Button {
-                UIPasteboard.general.string = message.content
+                UIPasteboard.general.string = parsed.cleanText
             } label: {
                 Label("Скопировать текст", systemImage: "doc.on.doc")
             }
         }
+    }
+}
+
+// MARK: - Task Action Card View
+
+struct TaskActionCardView: View {
+    let payload: TaskActionPayload
+
+    private var formattedDate: String? {
+        guard let due = payload.dueDate, let date = AIActionService.parseDate(due) else { return payload.dueDate }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "ru_RU")
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        return df.string(from: date)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color(hex: "43e97b"))
+
+                Text("Задача создана")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color(hex: "43e97b"))
+
+                Spacer()
+
+                if let priority = payload.priority, !priority.isEmpty {
+                    Text(priorityLabel(priority))
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(priorityColor(priority).opacity(0.15))
+                        .foregroundStyle(priorityColor(priority))
+                        .clipShape(Capsule())
+                }
+            }
+
+            Text(payload.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(2)
+
+            HStack(spacing: 8) {
+                if let dateStr = formattedDate {
+                    HStack(spacing: 3) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 10))
+                        Text(dateStr)
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                }
+
+                if let category = payload.category, !category.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 10))
+                        Text(category)
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                }
+
+                Spacer()
+
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.system(size: 9))
+                    Text("В «Задачи»")
+                        .font(.system(size: 9, weight: .medium))
+                }
+                .foregroundStyle(Color(hex: "43e97b").opacity(0.85))
+            }
+            .padding(.top, 2)
+        }
+        .padding(10)
+        .background(Color(hex: "43e97b").opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(hex: "43e97b").opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private func priorityLabel(_ raw: String) -> String {
+        let lower = raw.lowercased()
+        if lower.contains("urgent") || lower.contains("сроч") { return "Срочно" }
+        if lower.contains("high") || lower.contains("высок") { return "Высокий" }
+        if lower.contains("low") || lower.contains("низк") { return "Низкий" }
+        return "Обычный"
+    }
+
+    private func priorityColor(_ raw: String) -> Color {
+        let lower = raw.lowercased()
+        if lower.contains("urgent") || lower.contains("сроч") { return Color(hex: "ff0844") }
+        if lower.contains("high") || lower.contains("высок") { return Color(hex: "f5576c") }
+        if lower.contains("low") || lower.contains("низк") { return Color(hex: "4facfe") }
+        return Color(hex: "ffa726")
+    }
+}
+
+// MARK: - Transaction Action Card View
+
+struct TransactionActionCardView: View {
+    let payload: TransactionActionPayload
+
+    private var isIncome: Bool {
+        payload.type.lowercased() == "income"
+    }
+
+    private var accentColor: Color {
+        isIncome ? Color(hex: "43e97b") : Color(hex: "fa709a")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: isIncome ? "arrow.up.left.circle.fill" : "arrow.down.right.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(accentColor)
+
+                Text(isIncome ? "Доход записан" : "Расход записан")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(accentColor)
+
+                Spacer()
+
+                Text(payload.amount.currencyFormatted)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(accentColor)
+            }
+
+            Text(payload.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(AppColors.textPrimary)
+                .lineLimit(2)
+
+            HStack(spacing: 8) {
+                if let cat = payload.category, !cat.isEmpty {
+                    Text(cat)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                }
+
+                Spacer()
+
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.system(size: 9))
+                    Text("В «Финансы»")
+                        .font(.system(size: 9, weight: .medium))
+                }
+                .foregroundStyle(accentColor.opacity(0.85))
+            }
+            .padding(.top, 2)
+        }
+        .padding(10)
+        .background(accentColor.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(accentColor.opacity(0.22), lineWidth: 1)
+        )
     }
 }
 

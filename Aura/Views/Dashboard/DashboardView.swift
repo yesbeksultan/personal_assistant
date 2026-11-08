@@ -6,7 +6,6 @@ struct DashboardView: View {
     @Query private var tasks: [TaskItem]
     @Query private var transactions: [Transaction]
     @State private var calendarService = CalendarService.shared
-    @State private var showSettings = false
     @State private var greeting = ""
     
     var body: some View {
@@ -35,19 +34,6 @@ struct DashboardView: View {
             }
             .background(AppColors.appBackground)
             .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundStyle(AppColors.textPrimary.opacity(0.7))
-                    }
-                }
-            }
-            .sheet(isPresented: $showSettings) {
-                SettingsView()
-            }
         }
         .onAppear {
             updateGreeting()

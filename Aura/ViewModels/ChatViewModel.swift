@@ -77,8 +77,16 @@ class ChatViewModel {
                 transactions: resolvedTransactions,
                 calendarEvents: calEvents
             )
+
+            // Execute any extracted direct actions (creating tasks, logging expenses/income)
+            let (_, actions) = AIActionService.extractActions(from: response)
+            if !actions.isEmpty {
+                AIActionService.execute(actions: actions, in: context)
+            }
+
             let aiMessage = ChatMessage(content: response, isFromUser: false, session: session)
             context.insert(aiMessage)
+            try? context.save()
         } catch {
             errorMessage = error.localizedDescription
             let errorMsg = ChatMessage(content: "❌ Ошибка: \(error.localizedDescription)", isFromUser: false, session: session)

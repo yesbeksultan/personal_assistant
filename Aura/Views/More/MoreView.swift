@@ -5,6 +5,8 @@ import SwiftUI
 struct MoreView: View {
     @StateObject private var prefs = TabPreferences.shared
     @State private var showEditSheet = false
+    @State private var showSettings = false
+    @State private var showFAQ = false
 
     // For navigation to extra tabs
     @State private var navigatingTo: AppTab? = nil
@@ -14,9 +16,56 @@ struct MoreView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
 
+                    // Settings & Help Section
+                    sectionHeader("Приложение")
+
+                    VStack(spacing: 0) {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            SystemMenuRow(
+                                title: "Настройки",
+                                subtitle: "Тема, Gemini API, уведомления, iCloud",
+                                icon: "gearshape.fill",
+                                gradient: AppGradients.purple
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Divider().padding(.leading, 62)
+
+                        Button {
+                            showFAQ = true
+                        } label: {
+                            SystemMenuRow(
+                                title: "Инструкция и FAQ",
+                                subtitle: "Возможности Friday, команды и советы",
+                                icon: "questionmark.circle.fill",
+                                gradient: [Color(hex: "4facfe"), Color(hex: "00f2fe")]
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Divider().padding(.leading, 62)
+
+                        Button {
+                            showEditSheet = true
+                        } label: {
+                            SystemMenuRow(
+                                title: "Настройка вкладок",
+                                subtitle: "Выбор разделов для нижней панели",
+                                icon: "slider.horizontal.3",
+                                gradient: [Color(hex: "fa709a"), Color(hex: "fee140")]
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 16)
+
                     // Extra tabs grid (not in main bar)
                     if !prefs.extraTabs.isEmpty {
-                        sectionHeader("Разделы")
+                        sectionHeader("Другие разделы")
 
                         LazyVGrid(
                             columns: [GridItem(.flexible()), GridItem(.flexible())],
@@ -57,12 +106,19 @@ struct MoreView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showEditSheet = true
+                        showSettings = true
                     } label: {
-                        Text("Настроить")
-                            .font(.subheadline.weight(.medium))
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.primary)
                     }
                 }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
+            .sheet(isPresented: $showFAQ) {
+                FAQView()
             }
             .sheet(isPresented: $showEditSheet) {
                 EditTabsSheet()
@@ -271,3 +327,52 @@ struct EditTabsSheet: View {
 #Preview {
     MoreView()
 }
+// MARK: - SystemMenuRow Minimal Implementation
+
+private struct SystemMenuRow: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let gradient: [Color]
+    
+    init(title: String, subtitle: String, icon: String, gradient: [Color]) {
+        self.title = title
+        self.subtitle = subtitle
+        self.icon = icon
+        self.gradient = gradient
+    }
+    
+    // Convenience init to allow passing a single gradient Color
+    init(title: String, subtitle: String, icon: String, gradient: Color) {
+        self.init(title: title, subtitle: subtitle, icon: icon, gradient: [gradient])
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 44, height: 44)
+                Image(systemName: icon)
+                    .foregroundStyle(.white)
+                    .font(.system(size: 22, weight: .medium))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
