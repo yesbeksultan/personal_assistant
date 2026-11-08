@@ -1,6 +1,56 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - Performance Cache for Parsed Markdown
+
+private final class MarkdownCache {
+    static let shared = MarkdownCache()
+    private let cache = NSCache<NSString, NSAttributedString>()
+    
+    private init() {
+        cache.countLimit = 400
+    }
+    
+    func attributed(from markdown: String) -> AttributedString {
+        let key = markdown as NSString
+        if let cached = cache.object(forKey: key) {
+            return AttributedString(cached)
+        }
+        
+        let parsed: AttributedString
+        do {
+            parsed = try AttributedString(
+                markdown: markdown,
+                options: AttributedString.MarkdownParsingOptions(
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                    failurePolicy: .returnPartiallyParsedIfPossible
+                )
+            )
+        } catch {
+            parsed = AttributedString(markdown)
+        }
+        
+        cache.setObject(NSAttributedString(parsed), forKey: key)
+        return parsed
+    }
+}
+
+// MARK: - Fast Date Formatters
+
+private enum ChatTimeFormatters {
+    static let shortTime: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale.autoupdatingCurrent
+        f.dateStyle = .none
+        f.timeStyle = .short
+        return f
+    }()
+    
+    static func format(_ date: Date) -> String {
+        shortTime.string(from: date)
+    }
+}
+
 // MARK: - Chat List
 
 struct ChatView: View {
@@ -97,6 +147,7 @@ struct ChatView: View {
             .padding(.vertical, 8)
             .padding(.bottom, 80)
         }
+        .scrollDismissesKeyboard(.interactively)
         .animation(.easeInOut(duration: 0.3), value: sessions.count)
     }
 
@@ -125,10 +176,17 @@ private struct SessionCardButtonStyle: ButtonStyle {
     }
 }
 
-private struct SessionCard: View {
+private struct SessionCard: View, Equatable {
     let session: ChatSession
     let onTap: () -> Void
     let onDelete: () -> Void
+
+    static func == (lhs: SessionCard, rhs: SessionCard) -> Bool {
+        lhs.session.id == rhs.session.id &&
+        lhs.session.title == rhs.session.title &&
+        lhs.session.createdAt == rhs.session.createdAt &&
+        (lhs.session.messages?.count ?? 0) == (rhs.session.messages?.count ?? 0)
+    }
 
     private var messageCount: Int { session.messages?.count ?? 0 }
 
@@ -200,9 +258,11 @@ private struct SessionCard: View {
 struct ChatDetailView: View {
     let session: ChatSession
     let isNew: Bool
+    
+    // Performance: Only query messages belonging to this session.
+    // Tasks and transactions are fetched on-demand in ChatViewModel without reactive query overhead.
     @Query private var messages: [ChatMessage]
-    @Query private var tasks: [TaskItem]
-    @Query private var transactions: [Transaction]
+    
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ChatViewModel()
@@ -235,8 +295,6 @@ struct ChatDetailView: View {
                 inputBar
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture { isInputFocused = false }
         .navigationTitle(session.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -249,9 +307,7 @@ struct ChatDetailView: View {
 
                     Button {
                         Task {
-                            await viewModel.generateDailySummary(
-                                context: modelContext, tasks: tasks, transactions: transactions
-                            )
+                            await viewModel.generateDailySummary(context: modelContext)
                         }
                     } label: { Label("Вечерняя сводка", systemImage: "moon.stars") }
 
@@ -327,8 +383,6 @@ struct ChatDetailView: View {
                                 await viewModel.sendMessage(
                                     context: modelContext,
                                     messages: messages,
-                                    tasks: tasks,
-                                    transactions: transactions,
                                     events: calendarService.upcomingEvents
                                 )
                             }
@@ -339,10 +393,9 @@ struct ChatDetailView: View {
 
                 Spacer(minLength: 20)
             }
-            .padding(.bottom, 100)
+            .padding(.bottom, 60)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { isInputFocused = false }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var quickActions: [String] {
@@ -354,52 +407,58 @@ struct ChatDetailView: View {
         ]
     }
 
-    // MARK: - Messages
+    // MARK: - Messages (High-Performance Virtualized List)
 
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 10) {
                     ForEach(messages, id: \.id) { message in
                         MessageBubble(message: message)
                             .id(message.id)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: message.isFromUser ? .trailing : .leading)
-                                    .combined(with: .opacity),
-                                removal: .opacity
-                            ))
                     }
 
                     if viewModel.isLoading {
                         TypingIndicator()
+                            .id("typingIndicator")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
                     }
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 12)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { isInputFocused = false }
+            .defaultScrollAnchor(.bottom)
+            .scrollDismissesKeyboard(.interactively)
             .onAppear {
                 if let last = messages.last {
                     DispatchQueue.main.async {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                        proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
             .onChange(of: messages.count) { _, _ in
                 if let last = messages.last {
-                    withAnimation(.spring(response: 0.4)) {
+                    withAnimation(.easeOut(duration: 0.22)) {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
-            .onChange(of: viewModel.isLoading) { _, _ in
-                if let last = messages.last {
-                    withAnimation(.spring(response: 0.4)) {
+            .onChange(of: viewModel.isLoading) { _, loading in
+                withAnimation(.easeOut(duration: 0.22)) {
+                    if loading {
+                        proxy.scrollTo("typingIndicator", anchor: .bottom)
+                    } else if let last = messages.last {
                         proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+            .onChange(of: isInputFocused) { _, focused in
+                if focused, let last = messages.last {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                        withAnimation(.easeOut(duration: 0.22)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -450,7 +509,6 @@ struct ChatDetailView: View {
                             .rotationEffect(.degrees(showFunctionPicker && !isActive ? 45 : 0))
                     }
                 }
-                .animation(.spring(response: 0.3), value: viewModel.activeFunction != nil)
 
                 TextField("Спроси Friday...", text: $viewModel.messageText, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -474,8 +532,6 @@ struct ChatDetailView: View {
                         await viewModel.sendMessage(
                             context: modelContext,
                             messages: messages,
-                            tasks: tasks,
-                            transactions: transactions,
                             events: calendarService.upcomingEvents
                         )
                     }
@@ -492,7 +548,6 @@ struct ChatDetailView: View {
                         )
                 }
                 .disabled(viewModel.messageText.isEmpty || viewModel.isLoading)
-                .animation(.spring(response: 0.3), value: viewModel.messageText.isEmpty)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -568,7 +623,6 @@ struct ChatDetailView: View {
                                         : Color.clear, lineWidth: 1)
                             )
                     }
-                    .animation(.spring(response: 0.25), value: isSelected)
                 }
             }
             .padding(.horizontal, 14)
@@ -593,7 +647,6 @@ struct ChatDetailView: View {
                     withAnimation(.spring(response: 0.35)) {
                         viewModel.activeFunction = fn
                         showFunctionPicker = false
-                        // default to week
                         viewModel.selectedPeriod = .week
                     }
                 } label: {
@@ -681,10 +734,17 @@ private struct QuickActionButton: View {
     }
 }
 
-// MARK: - Message Bubble
+// MARK: - Optimized Equatable Message Bubble
 
-struct MessageBubble: View {
+struct MessageBubble: View, Equatable {
     let message: ChatMessage
+
+    static func == (lhs: MessageBubble, rhs: MessageBubble) -> Bool {
+        lhs.message.id == rhs.message.id &&
+        lhs.message.content == rhs.message.content &&
+        lhs.message.isFromUser == rhs.message.isFromUser &&
+        lhs.message.timestamp == rhs.message.timestamp
+    }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
@@ -700,25 +760,33 @@ struct MessageBubble: View {
     }
 
     private var userBubble: some View {
-        VStack(alignment: .trailing, spacing: 4) {
+        VStack(alignment: .trailing, spacing: 3) {
             Text(message.content)
                 .font(.subheadline)
                 .foregroundStyle(AppColors.textPrimary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(AppColors.textPrimary.opacity(0.1))
-                .clipShape(BubbleShape(isFromUser: true))
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 18,
+                        bottomLeadingRadius: 18,
+                        bottomTrailingRadius: 4,
+                        topTrailingRadius: 18,
+                        style: .continuous
+                    )
+                )
                 .textSelection(.enabled)
 
-            Text(message.timestamp.formatted(date: .omitted, time: .shortened))
+            Text(ChatTimeFormatters.format(message.timestamp))
                 .font(.system(size: 10))
                 .foregroundStyle(AppColors.textPrimary.opacity(0.3))
+                .padding(.trailing, 2)
         }
     }
 
     private var aiBubble: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            // AI avatar dot
             Circle()
                 .fill(AppColors.textPrimary.opacity(0.07))
                 .frame(width: 24, height: 24)
@@ -728,16 +796,23 @@ struct MessageBubble: View {
                         .foregroundStyle(AppColors.textPrimary.opacity(0.4))
                 )
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(parseMarkdown(message.content))
+            VStack(alignment: .leading, spacing: 3) {
+                // Cached markdown parser — 0ms on scroll
+                Text(MarkdownCache.shared.attributed(from: message.content))
                     .font(.subheadline)
                     .foregroundStyle(AppColors.textPrimary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(
-                        AppColors.textPrimary.opacity(0.08)
+                    .background(AppColors.textPrimary.opacity(0.08))
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 18,
+                            bottomLeadingRadius: 4,
+                            bottomTrailingRadius: 18,
+                            topTrailingRadius: 18,
+                            style: .continuous
+                        )
                     )
-                    .clipShape(BubbleShape(isFromUser: false))
                     .textSelection(.enabled)
                     .contextMenu {
                         Button {
@@ -747,24 +822,11 @@ struct MessageBubble: View {
                         }
                     }
 
-                Text(message.timestamp.formatted(date: .omitted, time: .shortened))
+                Text(ChatTimeFormatters.format(message.timestamp))
                     .font(.system(size: 10))
                     .foregroundStyle(AppColors.textPrimary.opacity(0.3))
+                    .padding(.leading, 2)
             }
-        }
-    }
-
-    private func parseMarkdown(_ text: String) -> AttributedString {
-        do {
-            return try AttributedString(
-                markdown: text,
-                options: AttributedString.MarkdownParsingOptions(
-                    interpretedSyntax: .inlineOnlyPreservingWhitespace,
-                    failurePolicy: .returnPartiallyParsedIfPossible
-                )
-            )
-        } catch {
-            return AttributedString(text)
         }
     }
 }
@@ -790,7 +852,7 @@ private struct TypingIndicator: View {
                     Circle()
                         .fill(AppColors.textPrimary.opacity(0.5))
                         .frame(width: 7, height: 7)
-                        .scaleEffect(animating ? 1.3 : 0.7)
+                        .scaleEffect(animating ? 1.25 : 0.75)
                         .opacity(animating ? 1.0 : 0.4)
                         .animation(
                             .easeInOut(duration: 0.5)
@@ -803,45 +865,18 @@ private struct TypingIndicator: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .background(AppColors.textPrimary.opacity(0.08))
-            .clipShape(BubbleShape(isFromUser: false))
+            .clipShape(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 18,
+                    bottomLeadingRadius: 4,
+                    bottomTrailingRadius: 18,
+                    topTrailingRadius: 18,
+                    style: .continuous
+                )
+            )
         }
         .onAppear { animating = true }
         .onDisappear { animating = false }
-    }
-}
-
-// MARK: - Bubble Shape
-// Аккуратные скруглённые углы: один угол «острее» — имитация хвостика мессенджера
-
-private struct BubbleShape: Shape {
-    let isFromUser: Bool
-
-    func path(in rect: CGRect) -> Path {
-        let r: CGFloat = 18   // основной радиус
-        let rt: CGFloat = 4   // радиус «хвостикового» угла
-
-        // Углы: topLeft, topRight, bottomRight, bottomLeft
-        let tl: CGFloat = isFromUser ? r  : rt
-        let tr: CGFloat = isFromUser ? rt : r
-        let br: CGFloat = isFromUser ? r  : r
-        let bl: CGFloat = isFromUser ? r  : r
-
-        return Path { p in
-            p.move(to: CGPoint(x: rect.minX + tl, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.minY))
-            p.addArc(center: CGPoint(x: rect.maxX - tr, y: rect.minY + tr),
-                     radius: tr, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - br))
-            p.addArc(center: CGPoint(x: rect.maxX - br, y: rect.maxY - br),
-                     radius: br, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
-            p.addLine(to: CGPoint(x: rect.minX + bl, y: rect.maxY))
-            p.addArc(center: CGPoint(x: rect.minX + bl, y: rect.maxY - bl),
-                     radius: bl, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + tl))
-            p.addArc(center: CGPoint(x: rect.minX + tl, y: rect.minY + tl),
-                     radius: tl, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
-            p.closeSubpath()
-        }
     }
 }
 
@@ -850,7 +885,7 @@ private struct BubbleShape: Shape {
 private extension Date {
     var chatFormatted: String {
         if Calendar.current.isDateInToday(self) {
-            return formatted(date: .omitted, time: .shortened)
+            return ChatTimeFormatters.format(self)
         } else if Calendar.current.isDateInYesterday(self) {
             return "Вчера"
         } else {

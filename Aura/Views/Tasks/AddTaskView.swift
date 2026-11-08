@@ -6,15 +6,44 @@ struct AddTaskView: View {
     @Environment(\.dismiss) private var dismiss
     
     var editingTask: TaskItem?
+    var initialDueDate: Date?
     
-    @State private var title = ""
-    @State private var taskDescription = ""
-    @State private var category = "Общее"
-    @State private var priority: TaskPriority = .medium
-    @State private var hasDueDate = false
-    @State private var dueDate = Date()
+    @State private var title: String
+    @State private var taskDescription: String
+    @State private var category: String
+    @State private var priority: TaskPriority
+    @State private var hasDueDate: Bool
+    @State private var dueDate: Date
     
     var isEditing: Bool { editingTask != nil }
+    
+    init(editingTask: TaskItem? = nil, initialDueDate: Date? = nil) {
+        self.editingTask = editingTask
+        self.initialDueDate = initialDueDate
+        
+        if let editingTask {
+            _title = State(initialValue: editingTask.title)
+            _taskDescription = State(initialValue: editingTask.taskDescription)
+            _category = State(initialValue: editingTask.category)
+            _priority = State(initialValue: editingTask.priority)
+            _hasDueDate = State(initialValue: editingTask.dueDate != nil)
+            _dueDate = State(initialValue: editingTask.dueDate ?? Date())
+        } else if let initialDueDate {
+            _title = State(initialValue: "")
+            _taskDescription = State(initialValue: "")
+            _category = State(initialValue: "Общее")
+            _priority = State(initialValue: .medium)
+            _hasDueDate = State(initialValue: true)
+            _dueDate = State(initialValue: initialDueDate)
+        } else {
+            _title = State(initialValue: "")
+            _taskDescription = State(initialValue: "")
+            _category = State(initialValue: "Общее")
+            _priority = State(initialValue: .medium)
+            _hasDueDate = State(initialValue: false)
+            _dueDate = State(initialValue: Date())
+        }
+    }
     
     var body: some View {
         NavigationStack {

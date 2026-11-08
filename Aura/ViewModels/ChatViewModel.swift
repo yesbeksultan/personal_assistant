@@ -40,7 +40,13 @@ class ChatViewModel {
     private let geminiService = GeminiService.shared
     
     @MainActor
-    func sendMessage(context: ModelContext, messages: [ChatMessage], tasks: [TaskItem] = [], transactions: [Transaction] = [], events: [CalendarEvent] = []) async {
+    func sendMessage(
+        context: ModelContext,
+        messages: [ChatMessage],
+        tasks: [TaskItem]? = nil,
+        transactions: [Transaction]? = nil,
+        events: [CalendarEvent] = []
+    ) async {
         let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         
@@ -56,10 +62,21 @@ class ChatViewModel {
         isLoading = true
         errorMessage = nil
         
+        // Fetch context on-demand only when needed
+        let resolvedTasks = tasks ?? fetchRecentTasks(context: context)
+        let resolvedTransactions = transactions ?? fetchRecentTransactions(context: context)
+        
         do {
             let period = (activeFunction == .finance) ? selectedPeriod : nil
             let calEvents = (activeFunction == .calendar) ? events : []
-            let response = try await geminiService.sendMessage(text, period: period, context: messages, tasks: tasks, transactions: transactions, calendarEvents: calEvents)
+            let response = try await geminiService.sendMessage(
+                text,
+                period: period,
+                context: messages,
+                tasks: resolvedTasks,
+                transactions: resolvedTransactions,
+                calendarEvents: calEvents
+            )
             let aiMessage = ChatMessage(content: response, isFromUser: false, session: session)
             context.insert(aiMessage)
         } catch {
@@ -77,14 +94,21 @@ class ChatViewModel {
     }
     
     @MainActor
-    func generateDailySummary(context: ModelContext, tasks: [TaskItem], transactions: [Transaction]) async {
+    func generateDailySummary(
+        context: ModelContext,
+        tasks: [TaskItem]? = nil,
+        transactions: [Transaction]? = nil
+    ) async {
         isLoading = true
         
         let summaryRequest = ChatMessage(content: "📊 Запрос вечерней сводки...", isFromUser: true, session: session)
         context.insert(summaryRequest)
         
+        let resolvedTasks = tasks ?? fetchRecentTasks(context: context)
+        let resolvedTransactions = transactions ?? fetchRecentTransactions(context: context)
+        
         do {
-            let summary = try await geminiService.generateDailySummary(tasks: tasks, transactions: transactions)
+            let summary = try await geminiService.generateDailySummary(tasks: resolvedTasks, transactions: resolvedTransactions)
             let aiMessage = ChatMessage(content: summary, isFromUser: false, session: session)
             context.insert(aiMessage)
         } catch {
@@ -99,5 +123,23 @@ class ChatViewModel {
         for message in messages {
             context.delete(message)
         }
+    }
+    
+    // MARK: - Private On-Demand Context Fetching (Zero overhead when not chatting)
+    
+    private func fetchRecentTasks(context: ModelContext) -> [TaskItem] {
+        var descriptor = FetchDescriptor<TaskItem>(
+            predicate: #Predicate { !$0.isCompleted }
+        )
+        descriptor.fetchLimit = 25
+        return (try? context.fetch(descriptor)) ?? []
+    }
+    
+    private func fetchRecentTransactions(context: ModelContext) -> [Transaction] {
+        var descriptor = FetchDescriptor<Transaction>(
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        descriptor.fetchLimit = 25
+        return (try? context.fetch(descriptor)) ?? []
     }
 }
