@@ -1,5 +1,6 @@
 import SwiftUI
 import UserNotifications
+import LocalAuthentication
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -13,6 +14,11 @@ struct SettingsView: View {
 
     // Bank notification parsing
     @State private var bankParsingEnabled = BankNotificationParser.shared.isEnabled
+
+    // Finance lock
+    @AppStorage("financeLockEnabled") private var financeLockEnabled: Bool = true
+    @State private var biometryAvailable: Bool = false
+    @State private var biometryType: String = "Face ID"
 
     // Notification permission
     @State private var authStatus: UNAuthorizationStatus = .notDetermined
@@ -314,6 +320,89 @@ struct SettingsView: View {
                             }
                         }
 
+                        // MARK: — Finance Lock
+                        SettingsSection(
+                            icon: "lock.shield.fill",
+                            title: "Блокировка финансов",
+                            gradient: [Color(hex: "667eea"), Color(hex: "764ba2")]
+                        ) {
+                            VStack(alignment: .leading, spacing: 14) {
+                                // Main toggle
+                                Toggle(isOn: $financeLockEnabled) {
+                                    HStack(spacing: 10) {
+                                        ZStack {
+                                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                .fill(financeLockEnabled
+                                                      ? Color(hex: "667eea").opacity(0.15)
+                                                      : AppColors.textPrimary.opacity(0.08))
+                                                .frame(width: 36, height: 36)
+                                            Image(systemName: financeLockEnabled ? "lock.fill" : "lock.open.fill")
+                                                .font(.system(size: 15))
+                                                .foregroundStyle(financeLockEnabled
+                                                                 ? Color(hex: "667eea")
+                                                                 : AppColors.textPrimary.opacity(0.4))
+                                        }
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(financeLockEnabled ? "Защита включена" : "Защита выключена")
+                                                .font(.subheadline).fontWeight(.medium)
+                                                .foregroundStyle(AppColors.textPrimary)
+                                            Text(financeLockEnabled
+                                                 ? "Суммы скрыты до \(biometryType) / пароля"
+                                                 : "Суммы видны без разблокировки")
+                                                .font(.caption)
+                                                .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                                        }
+                                    }
+                                }
+                                .tint(Color(hex: "667eea"))
+
+                                if financeLockEnabled {
+                                    // Biometry status pill
+                                    HStack(spacing: 8) {
+                                        Image(systemName: biometryAvailable
+                                              ? (biometryType == "Face ID" ? "faceid" : "touchid")
+                                              : "lock.fill")
+                                            .font(.system(size: 13))
+                                            .foregroundStyle(biometryAvailable
+                                                             ? Color(hex: "43e97b")
+                                                             : Color(hex: "fee140"))
+                                        Text(biometryAvailable
+                                             ? "\(biometryType) — будет использован при разблокировке"
+                                             : "Биометрия недоступна — используется пароль устройства")
+                                            .font(.caption)
+                                            .foregroundStyle(AppColors.textPrimary.opacity(0.55))
+                                    }
+                                    .padding(10)
+                                    .background(biometryAvailable
+                                                ? Color(hex: "43e97b").opacity(0.07)
+                                                : Color(hex: "fee140").opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                    // Test unlock button
+                                    Button {
+                                        testFinanceLock()
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: biometryAvailable
+                                                  ? (biometryType == "Face ID" ? "faceid" : "touchid")
+                                                  : "lock.fill")
+                                            Text("Проверить разблокировку")
+                                        }
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(Color(hex: "667eea"))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 11)
+                                        .background(Color(hex: "667eea").opacity(0.1))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
+                                }
+
+                                Text("Когда защита включена, баланс и суммы транзакций скрыты — открыть можно через \(biometryType) или пароль устройства.")
+                                    .font(.caption)
+                                    .foregroundStyle(AppColors.textPrimary.opacity(0.35))
+                            }
+                        }
+
                         // MARK: — About
                         SettingsSection(icon: "info.circle.fill", title: "О приложении", gradient: AppGradients.green) {
                             VStack(alignment: .leading, spacing: 6) {
@@ -339,11 +428,14 @@ struct SettingsView: View {
             }
             .alert("Сохранено ✅", isPresented: $showSavedAlert) {
                 Button("ОК") {}
+            } message: {
+                Text("Разблокировка работает корректно!")
             }
             .onAppear {
                 apiKey = UserDefaults.standard.string(forKey: "gemini_api_key") ?? ""
                 loadTimes()
                 refreshAuthStatus()
+                detectBiometry()
             }
         }
     }
@@ -353,6 +445,31 @@ struct SettingsView: View {
     private func refreshAuthStatus() {
         NotificationService.shared.checkAuthorizationStatus { status in
             authStatus = status
+        }
+    }
+
+    private func detectBiometry() {
+        let context = LAContext()
+        var error: NSError?
+        biometryAvailable = context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error)
+        switch context.biometryType {
+        case .faceID:    biometryType = "Face ID"
+        case .touchID:   biometryType = "Touch ID"
+        case .opticID:   biometryType = "Optic ID"
+        default:         biometryType = "пароль"
+        }
+    }
+
+    private func testFinanceLock() {
+        let context = LAContext()
+        var error: NSError?
+        let reason = "Проверка разблокировки раздела «Финансы»"
+        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) {
+            context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
+                DispatchQueue.main.async {
+                    showSavedAlert = success
+                }
+            }
         }
     }
 

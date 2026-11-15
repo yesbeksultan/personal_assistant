@@ -14,6 +14,9 @@ struct FinanceView: View {
     @State private var showManageCategories = false
     @State private var showManualParser = false
     private let syncService = iCloudDataSyncService.shared
+
+    // Finance lock setting — if false, data is always visible
+    @AppStorage("financeLockEnabled") private var financeLockEnabled: Bool = true
     
     // Import/Export State
     @State private var showJSONExporter = false
@@ -128,7 +131,8 @@ struct FinanceView: View {
                 Text(authError ?? "")
             }
             .onAppear {
-                isSensitiveUnlocked = false
+                // If lock is disabled — always show data
+                isSensitiveUnlocked = !financeLockEnabled
             }
             .onChange(of: transactions.count) { exportToiCloud() }
             .onReceive(NotificationCenter.default.publisher(for: .iCloudDataDidDownload)) { notification in
@@ -236,8 +240,11 @@ struct FinanceView: View {
                 Button {
                     authenticate()
                 } label: {
-                    Label("Показать", systemImage: "faceid")
-                        .font(.system(size: 13, weight: .semibold))
+                    HStack(spacing: 6) {
+                        Image(systemName: biometricIcon)
+                        Text("Показать")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundStyle(Color(hex: "667eea"))
             }
@@ -249,6 +256,16 @@ struct FinanceView: View {
             RoundedRectangle(cornerRadius: 20)
                 .stroke(AppColors.textPrimary.opacity(0.07), lineWidth: 1)
         )
+    }
+
+    /// Returns the appropriate biometric icon name for the device
+    private var biometricIcon: String {
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            return "lock.fill"
+        }
+        return context.biometryType == .faceID ? "faceid" : "touchid"
     }
     
     // MARK: - Period Picker
