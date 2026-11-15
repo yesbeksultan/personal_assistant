@@ -33,22 +33,28 @@ struct fridayApp: App {
                     // Auto-sync data from iCloud on launch
                     iCloudDataSyncService.shared.syncOnLaunch()
                 }
+                .onOpenURL { url in
+                    // Handle deep links from Apple Shortcuts / Apple Pay / external triggers
+                    DeepLinkParserService.shared.handleURL(url)
+                }
         }
-        .modelContainer(sharedModelContainer)
+        .modelContainer(AppStorageContainer.shared)
     }
 }
 
 // MARK: - Local SwiftData container (free account compatible)
 
-private let sharedModelContainer: ModelContainer = {
-    let schema = Schema([
-        TaskItem.self,
-        Transaction.self,
-        ChatMessage.self,
-        ChatSession.self,
-        Game24Result.self
-    ])
-    let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-    return try! ModelContainer(for: schema, configurations: [config])
-}()
+enum AppStorageContainer {
+    static let shared: ModelContainer = {
+        let schema = Schema([
+            TaskItem.self,
+            Transaction.self,
+            ChatMessage.self,
+            ChatSession.self,
+            Game24Result.self
+        ])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        return try! ModelContainer(for: schema, configurations: [config])
+    }()
+}
 

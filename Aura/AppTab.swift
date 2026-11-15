@@ -78,6 +78,9 @@ class TabPreferences: ObservableObject {
         didSet { save() }
     }
 
+    /// Currently selected tab identifier in ContentView TabView
+    @Published var activeTabID: String = "dashboard"
+
     var extraTabs: [AppTab] {
         AppTab.allCases.filter { !mainTabs.contains($0) }
     }

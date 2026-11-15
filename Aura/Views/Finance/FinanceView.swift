@@ -13,6 +13,7 @@ struct FinanceView: View {
     @State private var authError: String? = nil
     @State private var showManageCategories = false
     @State private var showManualParser = false
+    @State private var showAutomationGuide = false
     private let syncService = iCloudDataSyncService.shared
 
     // Finance lock setting — if false, data is always visible
@@ -61,6 +62,12 @@ struct FinanceView: View {
                             showManualParser = true
                         } label: {
                             Label("Распознать СМС / уведомление", systemImage: "bell.badge")
+                        }
+
+                        Button {
+                            showAutomationGuide = true
+                        } label: {
+                            Label("Автоматизация Apple Pay и СМС", systemImage: "bolt.badge.automatic")
                         }
                         
                         Divider()
@@ -118,6 +125,9 @@ struct FinanceView: View {
             }
             .sheet(isPresented: $showManualParser) {
                 ManualNotificationParseView()
+            }
+            .sheet(isPresented: $showAutomationGuide) {
+                BankAutomationGuideView()
             }
             .alert(
                 "Ошибка аутентификации",

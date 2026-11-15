@@ -14,6 +14,8 @@ struct SettingsView: View {
 
     // Bank notification parsing
     @State private var bankParsingEnabled = BankNotificationParser.shared.isEnabled
+    @State private var autoSaveEnabled = BankNotificationParser.shared.isAutoSaveEnabled
+    @State private var showAutomationGuide = false
 
     // Finance lock
     @AppStorage("financeLockEnabled") private var financeLockEnabled: Bool = true
@@ -289,10 +291,10 @@ struct SettingsView: View {
                                             .foregroundStyle(.white)
                                     }
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Apple Wallet включён")
+                                        Text("Apple Wallet & СМС банков")
                                             .font(.caption).fontWeight(.semibold)
                                             .foregroundStyle(AppColors.textPrimary)
-                                        Text("Apple Pay покупки распознаются автоматически")
+                                        Text("Распознавание Apple Pay, Kaspi, Halyk и др.")
                                             .font(.caption2)
                                             .foregroundStyle(AppColors.textPrimary.opacity(0.45))
                                     }
@@ -304,6 +306,45 @@ struct SettingsView: View {
                                 .padding(10)
                                 .background(Color(hex: "43e97b").opacity(0.07))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                                // Auto-Save toggle
+                                Toggle(isOn: $autoSaveEnabled) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Авто-сохранение в расходы")
+                                            .font(.subheadline).fontWeight(.medium)
+                                            .foregroundStyle(AppColors.textPrimary)
+                                        Text("Записывать сразу без ожидания подтверждения")
+                                            .font(.caption)
+                                            .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                                    }
+                                }
+                                .tint(Color(hex: "43e97b"))
+                                .onChange(of: autoSaveEnabled) {
+                                    BankNotificationParser.shared.isAutoSaveEnabled = autoSaveEnabled
+                                }
+
+                                // Open Automation Guide Button
+                                Button {
+                                    showAutomationGuide = true
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "bolt.badge.automatic.fill")
+                                            .font(.system(size: 14))
+                                        Text("Инструкция по настройке автоматизации")
+                                            .font(.system(size: 13, weight: .semibold))
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .opacity(0.6)
+                                    }
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        LinearGradient(colors: [Color(hex: "667eea"), Color(hex: "764ba2")], startPoint: .leading, endPoint: .trailing)
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
 
                                 Text("При включённой опции уведомления от банков и Apple Wallet анализируются и предлагаются для добавления в расходы/доходы. Данные не покидают устройство.")
                                     .font(.caption)
@@ -430,6 +471,9 @@ struct SettingsView: View {
                 Button("ОК") {}
             } message: {
                 Text("Разблокировка работает корректно!")
+            }
+            .sheet(isPresented: $showAutomationGuide) {
+                BankAutomationGuideView()
             }
             .onAppear {
                 apiKey = UserDefaults.standard.string(forKey: "gemini_api_key") ?? ""

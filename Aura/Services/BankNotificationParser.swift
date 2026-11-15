@@ -28,13 +28,53 @@ final class BankNotificationParser {
 
     // UserDefaults key
     static let enabledKey = "bankNotifParsing_enabled"
+    static let autoSaveKey = "bankNotifParsing_autoSave"
 
     var isEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: Self.enabledKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.enabledKey) }
     }
 
+    /// When true, transactions received from Shortcuts / Apple Pay / deep links
+    /// are saved directly without requiring manual confirmation in drafts banner.
+    var isAutoSaveEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.autoSaveKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.autoSaveKey) }
+    }
+
     private init() {}
+
+    /// Process a parsed draft according to user's autoSave preference.
+    /// Returns true if saved directly to SwiftData, false if placed in pending drafts.
+    @discardableResult
+    func processDraft(_ draft: ParsedTransactionDraft, context: ModelContext? = nil) -> Bool {
+        if isAutoSaveEnabled {
+            let modelCtx = context ?? ModelContext(AppStorageContainer.shared)
+            let tx = Transaction(
+                title: draft.title,
+                amount: draft.amount,
+                type: draft.type,
+                category: draft.category,
+                date: draft.date,
+                note: draft.note.isEmpty ? draft.bankSource : "\(draft.bankSource) · \(draft.note)"
+            )
+            modelCtx.insert(tx)
+            try? modelCtx.save()
+            return true
+        } else {
+            PendingTransactionDrafts.shared.add(draft)
+            return false
+        }
+    }
+
+    /// Tries to parse text and processes it immediately.
+    func processText(_ text: String, bankHint: String = "", context: ModelContext? = nil) -> (draft: ParsedTransactionDraft?, autoSaved: Bool) {
+        guard let draft = tryParse(title: "", body: text, bundleID: bankHint.lowercased()) else {
+            return (nil, false)
+        }
+        let saved = processDraft(draft, context: context)
+        return (draft, saved)
+    }
 
     // MARK: - Entry point called from NotificationService delegate
 
@@ -220,7 +260,7 @@ final class BankNotificationParser {
 
     // MARK: - Category guessing
 
-    private func guessCategory(merchant: String, type: TransactionType) -> String {
+    func guessCategory(merchant: String, type: TransactionType) -> String {
         if type == .income { return "💵 Другое" }
 
         let m = merchant.lowercased()

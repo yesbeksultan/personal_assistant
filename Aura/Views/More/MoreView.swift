@@ -7,6 +7,7 @@ struct MoreView: View {
     @State private var showEditSheet = false
     @State private var showSettings = false
     @State private var showFAQ = false
+    @State private var showAutomationGuide = false
 
     // For navigation to extra tabs
     @State private var navigatingTo: AppTab? = nil
@@ -56,6 +57,20 @@ struct MoreView: View {
                                 subtitle: "Выбор разделов для нижней панели",
                                 icon: "slider.horizontal.3",
                                 gradient: [Color(hex: "fa709a"), Color(hex: "fee140")]
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Divider().padding(.leading, 62)
+
+                        Button {
+                            showAutomationGuide = true
+                        } label: {
+                            SystemMenuRow(
+                                title: "Авто-парсинг банков",
+                                subtitle: "Настройка Apple Pay и СМС автоматизации",
+                                icon: "bolt.badge.automatic.fill",
+                                gradient: [Color(hex: "667eea"), Color(hex: "764ba2")]
                             )
                         }
                         .buttonStyle(.plain)
@@ -123,6 +138,9 @@ struct MoreView: View {
             .sheet(isPresented: $showEditSheet) {
                 EditTabsSheet()
                     .environmentObject(prefs)
+            }
+            .sheet(isPresented: $showAutomationGuide) {
+                BankAutomationGuideView()
             }
         }
     }
