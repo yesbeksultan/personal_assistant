@@ -47,14 +47,22 @@ final class BankNotificationParser {
         // 1. Detect bank
         let bank = detectBank(bundleID: bundleID, text: combined)
 
-        // 2. Extract amount
-        guard let (amount, type) = extractAmountAndType(from: combined) else { return nil }
+        // 2. Extract amount (+ currency for Apple Wallet)
+        guard let (amount, type, currency) = extractAmountTypeAndCurrency(from: combined) else { return nil }
 
         // 3. Extract merchant / description
         let merchant = extractMerchant(from: combined, bank: bank)
 
         // 4. Map to category
         let category = guessCategory(merchant: merchant, type: type)
+
+        // 5. Build note — append currency for non-KZT Apple Wallet payments
+        let currencyNote: String
+        if bank == "Apple Wallet" && currency != "KZT" && currency != "₸" {
+            currencyNote = "\(body) [валюта: \(currency)]"
+        } else {
+            currencyNote = body
+        }
 
         return ParsedTransactionDraft(
             id: UUID(),
@@ -63,7 +71,7 @@ final class BankNotificationParser {
             type: type,
             category: category,
             date: Date(),
-            note: body,
+            note: currencyNote,
             bankSource: bank
         )
     }
@@ -73,6 +81,11 @@ final class BankNotificationParser {
     private func detectBank(bundleID: String, text: String) -> String {
         let bundleLower = bundleID.lowercased()
         let textLower   = text.lowercased()
+
+        // Apple Wallet / Apple Pay — проверяем первым (bundle com.apple.Passbook)
+        if bundleLower.contains("passbook") || bundleLower.contains("apple.wallet") ||
+           textLower.contains("apple pay")  || textLower.contains("apple card") ||
+           textLower.contains("apple wallet") { return "Apple Wallet" }
 
         if bundleLower.contains("kaspi")   || textLower.contains("kaspi")    { return "Kaspi" }
         if bundleLower.contains("halyk")   || textLower.contains("halyk")    { return "Halyk" }
@@ -88,13 +101,41 @@ final class BankNotificationParser {
 
     // MARK: - Amount & type extraction
 
-    private func extractAmountAndType(from text: String) -> (Double, TransactionType)? {
-        // Patterns to match amounts like:
-        //   "5 000 ₸", "5000 тг", "500.00 KZT", "-1 200,50 ₸", "+10000 тг"
-        //   "списано 3 500 тенге", "зачислено 50 000 ₸"
-        //   "покупка на сумму 2 000 ₸", "оплата 1500₸"
+    // MARK: - Amount, type & currency extraction
 
-        let patterns: [(String, TransactionType?)] = [
+    /// Extracts amount, transaction type, and currency symbol from notification text.
+    private func extractAmountTypeAndCurrency(from text: String) -> (Double, TransactionType, String)? {
+        let textLower = text.lowercased()
+
+        // --- Apple Wallet / Apple Pay patterns (foreign currencies) ---
+        // "You paid $12.99 at Starbucks", "Payment of €5.00", "charged $29.99"
+        let applePatterns: [(pattern: String, currency: String)] = [
+            (#"(?:you paid|payment of|charged|purchase of|paid)\s*\$\s*([\d\.,]+)"#, "USD"),
+            (#"(?:you paid|payment of|charged|purchase of|paid)\s*€\s*([\d\.,]+)"#, "EUR"),
+            (#"(?:you paid|payment of|charged|purchase of|paid)\s*£\s*([\d\.,]+)"#, "GBP"),
+            (#"\$\s*([\d\.,]+)"#,  "USD"),
+            (#"€\s*([\d\.,]+)"#,   "EUR"),
+            (#"£\s*([\d\.,]+)"#,   "GBP"),
+            (#"usd\s+([\d\.,]+)"#, "USD"),
+            (#"eur\s+([\d\.,]+)"#, "EUR"),
+            (#"gbp\s+([\d\.,]+)"#, "GBP"),
+        ]
+
+        for (pattern, currency) in applePatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: textLower, range: NSRange(textLower.startIndex..., in: textLower)),
+               match.numberOfRanges > 1,
+               let range = Range(match.range(at: 1), in: textLower) {
+                let raw = String(textLower[range])
+                    .replacingOccurrences(of: ",", with: ".")
+                if let value = Double(raw), value > 0 {
+                    return (value, .expense, currency)
+                }
+            }
+        }
+
+        // --- KZT / Tenge patterns ---
+        let kztPatterns: [(String, TransactionType?)] = [
             // explicit debit keywords → expense
             (#"(?:списан[оа]?|покупка|оплат[аы]|расход|withdrawal|debit|spent)[^\d]*([+-]?[\d\s\.,]+)\s*(?:₸|тг|тенге|kzt)"#, .expense),
             // explicit credit keywords → income
@@ -105,9 +146,7 @@ final class BankNotificationParser {
             (#"([\d\s\.,]+)\s*(?:₸|тг|тенге|kzt)"#, nil),
         ]
 
-        let textLower = text.lowercased()
-
-        for (pattern, forcedType) in patterns {
+        for (pattern, forcedType) in kztPatterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
                   let match = regex.firstMatch(in: textLower, range: NSRange(textLower.startIndex..., in: textLower)),
                   match.numberOfRanges > 1,
@@ -130,20 +169,28 @@ final class BankNotificationParser {
             } else if raw.hasPrefix("+") {
                 txType = .income
             } else {
-                // No sign — default to expense (most bank notifications are about spending)
                 txType = .expense
             }
-
-            return (value, txType)
+            return (value, txType, "KZT")
         }
         return nil
+    }
+
+    // Legacy wrapper for backward compat (clipboard parser etc.)
+    private func extractAmountAndType(from text: String) -> (Double, TransactionType)? {
+        guard let (amount, type, _) = extractAmountTypeAndCurrency(from: text) else { return nil }
+        return (amount, type)
     }
 
     // MARK: - Merchant extraction
 
     private func extractMerchant(from text: String, bank: String) -> String {
-        // Try to find merchant name after keywords like "в ", "у ", "магазин", "merchants:"
         let patterns = [
+            // Apple Pay: "You paid $12.99 at Starbucks", "Payment at Amazon"
+            #"(?:paid|payment|purchase)\s+(?:at|to|for)\s+([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё0-9\s&'.,-]{2,40})"#,
+            // Apple Wallet generic: "at Merchant Name"
+            #"\bat\s+([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё0-9\s&'.,-]{2,35})"#,
+            // Kaspi / Halyk style
             #"(?:в магазине|в|у|merchant:?|store:?)\s+([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё0-9\s&'-]{2,30})"#,
             #"(?:покупка|оплата)\s+(?:в\s+)?([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё0-9\s&'-]{2,30})"#,
         ]
@@ -152,8 +199,10 @@ final class BankNotificationParser {
                let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
                match.numberOfRanges > 1,
                let range = Range(match.range(at: 1), in: text) {
-                let name = String(text[range]).trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty { return name }
+                let name = String(text[range])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: .punctuationCharacters)
+                if !name.isEmpty && name.count > 1 { return name }
             }
         }
 
@@ -177,16 +226,19 @@ final class BankNotificationParser {
         let m = merchant.lowercased()
 
         let map: [(keywords: [String], category: String)] = [
-            (["glovo","yandex.eda","wolt","choco","burger","kfc","mcdonalds","кафе","ресторан","coffee","кофе","пицца","суши"], "🍔 Еда"),
+            (["glovo","yandex.eda","wolt","choco","burger","kfc","mcdonalds","кафе","ресторан","coffee","кофе","пицца","суши","starbucks","dunkin"], "🍔 Еда"),
             (["яндекс.такси","yandex.taxi","uber","bolt","indriver","такси","bus","автобус","метро","бензин","shell","bp "], "🚗 Транспорт"),
             (["аренда","квартира","жильё","коммунал","utilities","electr","вода","газ","свет"], "🏠 Жильё"),
-            (["netflix","spotify","apple","steam","playstation","кино","concert","театр","развлечен"], "🎮 Развлечения"),
-            (["одежда","zara","h&m","adidas","nike","lamoda","обувь"], "👕 Одежда"),
+            // Apple subscriptions / App Store / digital services
+            (["app store","apple.com/bill","apple subscription","itunes","apple one","icloud","icloud+"], "🍎 Apple"),
+            (["netflix","spotify","steam","playstation","youtube premium","кино","concert","театр","развлечен","hulu","disney"], "🎮 Развлечения"),
+            (["одежда","zara","h&m","adidas","nike","lamoda","обувь","uniqlo","shein"], "👕 Одежда"),
             (["аптека","pharmacy","doctor","медицина","клиника","здоровье"], "💊 Здоровье"),
             (["kaspi red","рассрочка","кредит","loan"], "📦 Другое"),
             (["билайн","kcell","activ","tele2","мобильн","связь"], "📱 Связь"),
-            (["книга","курс","учеба","образован","udemy","coursera"], "📚 Образование"),
+            (["книга","курс","учеба","образован","udemy","coursera","skillbox"], "📚 Образование"),
             (["свет","газ","интернет","telecom","вода","отопление","коммунал"], "💡 Коммуналка"),
+            (["amazon","aliexpress","wildberries","ozon","ebay","etsy"], "🛒 Шоппинг"),
         ]
 
         for (keywords, category) in map {

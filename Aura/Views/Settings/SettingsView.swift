@@ -272,7 +272,34 @@ struct SettingsView: View {
                                     BankNotificationParser.shared.isEnabled = bankParsingEnabled
                                 }
 
-                                Text("При включённой опции уведомления от банков анализируются и предлагаются для добавления в расходы/доходы. Данные не покидают устройство.")
+                                // Apple Wallet info row
+                                HStack(spacing: 10) {
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(Color(hex: "1c1c1e"))
+                                            .frame(width: 32, height: 32)
+                                        Image(systemName: "wallet.pass.fill")
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(.white)
+                                    }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Apple Wallet включён")
+                                            .font(.caption).fontWeight(.semibold)
+                                            .foregroundStyle(AppColors.textPrimary)
+                                        Text("Apple Pay покупки распознаются автоматически")
+                                            .font(.caption2)
+                                            .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+                                    }
+                                    Spacer()
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(Color(hex: "43e97b"))
+                                        .font(.system(size: 16))
+                                }
+                                .padding(10)
+                                .background(Color(hex: "43e97b").opacity(0.07))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                                Text("При включённой опции уведомления от банков и Apple Wallet анализируются и предлагаются для добавления в расходы/доходы. Данные не покидают устройство.")
                                     .font(.caption)
                                     .foregroundStyle(AppColors.textPrimary.opacity(0.4))
 

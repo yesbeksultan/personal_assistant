@@ -14,7 +14,7 @@ struct PendingDraftsBanner: View {
                 HStack {
                     Image(systemName: "bell.badge.fill")
                         .foregroundStyle(Color(hex: "fa709a"))
-                    Text("Из уведомлений банков")
+                    Text("Из уведомлений банков и кошельков")
                         .font(.headline)
                         .foregroundStyle(AppColors.textPrimary)
                     Spacer()
@@ -164,6 +164,11 @@ struct DraftRow: View {
                     .foregroundStyle(AppColors.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 4) {
+                    if draft.bankSource == "Apple Wallet" {
+                        Image(systemName: "wallet.pass.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                    }
                     Text(draft.bankSource)
                         .font(.caption2)
                         .foregroundStyle(AppColors.textPrimary.opacity(0.4))
@@ -284,7 +289,7 @@ struct ManualNotificationParseView: View {
                 .font(.caption)
                 .foregroundStyle(AppColors.textPrimary.opacity(0.5))
             HStack(spacing: 8) {
-                ForEach(["Kaspi", "Halyk", "Forte", "Jysan"], id: \.self) { bank in
+                ForEach(["Kaspi", "Halyk", "Forte", "Jysan", "Apple Wallet"], id: \.self) { bank in
                     Button {
                         bankName = (bankName == bank) ? "" : bank
                         parseText()
@@ -501,12 +506,14 @@ struct ParsedPreviewCard: View {
                     .font(.caption)
                     .foregroundStyle(AppColors.textPrimary.opacity(0.5))
                 HStack(spacing: 4) {
-                    Image(systemName: "building.columns.fill")
+                    Image(systemName: draft.bankSource == "Apple Wallet" ? "wallet.pass.fill" : "building.columns.fill")
                         .font(.caption2)
                     Text(draft.bankSource)
                         .font(.caption2)
                 }
-                .foregroundStyle(AppColors.textPrimary.opacity(0.35))
+                .foregroundStyle(draft.bankSource == "Apple Wallet"
+                    ? Color(hex: "1c1c1e").opacity(0.7)
+                    : AppColors.textPrimary.opacity(0.35))
             }
 
             Spacer()
