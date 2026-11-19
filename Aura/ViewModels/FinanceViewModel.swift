@@ -5,7 +5,32 @@ import SwiftUI
 @Observable
 class FinanceViewModel {
     var selectedPeriod: TimePeriod = .month
+    var selectedSection: FinanceSection = .expenses
     var selectedType: TransactionType? = nil
+    
+    enum FinanceSection: String, CaseIterable, Identifiable {
+        case expenses = "Расходы"
+        case income = "Доходы"
+        case all = "Обзор"
+        
+        var id: String { rawValue }
+        
+        var icon: String {
+            switch self {
+            case .expenses: return "arrow.up.right"
+            case .income:   return "arrow.down.left"
+            case .all:      return "chart.pie.fill"
+            }
+        }
+        
+        var accentColor: Color {
+            switch self {
+            case .expenses: return Color(hex: "fa709a")
+            case .income:   return Color(hex: "43e97b")
+            case .all:      return Color(hex: "667eea")
+            }
+        }
+    }
     
     enum TimePeriod: String, CaseIterable {
         case week = "Неделя"
@@ -13,10 +38,11 @@ class FinanceViewModel {
         case all = "Всё время"
     }
     
-    func filteredTransactions(_ transactions: [Transaction]) -> [Transaction] {
+    // MARK: - Filtering
+    
+    /// Transactions filtered purely by selected period (week, month, all)
+    func periodFilteredTransactions(_ transactions: [Transaction]) -> [Transaction] {
         var result = transactions
-        
-        // Filter by period
         switch selectedPeriod {
         case .week:
             result = result.filter { $0.date.isThisWeek }
@@ -25,32 +51,88 @@ class FinanceViewModel {
         case .all:
             break
         }
+        result.sort { $0.date > $1.date }
+        return result
+    }
+    
+    /// Transactions filtered by period AND section/type
+    func filteredTransactions(_ transactions: [Transaction]) -> [Transaction] {
+        var result = periodFilteredTransactions(transactions)
         
-        // Filter by type
         if let type = selectedType {
             result = result.filter { $0.type == type }
+        } else {
+            switch selectedSection {
+            case .expenses:
+                result = result.filter { $0.type == .expense }
+            case .income:
+                result = result.filter { $0.type == .income }
+            case .all:
+                break
+            }
         }
-        
-        // Sort by date (newest first)
-        result.sort { $0.date > $1.date }
         
         return result
     }
     
+    /// Explicitly get income transactions for selected period
+    func filteredIncomeTransactions(_ transactions: [Transaction]) -> [Transaction] {
+        periodFilteredTransactions(transactions).filter { $0.type == .income }
+    }
+    
+    /// Explicitly get expense transactions for selected period
+    func filteredExpenseTransactions(_ transactions: [Transaction]) -> [Transaction] {
+        periodFilteredTransactions(transactions).filter { $0.type == .expense }
+    }
+    
+    // MARK: - Period Totals
+    
     func totalIncome(_ transactions: [Transaction]) -> Double {
-        filteredTransactions(transactions)
+        periodFilteredTransactions(transactions)
             .filter { $0.type == .income }
             .reduce(0) { $0 + $1.amount }
     }
     
     func totalExpenses(_ transactions: [Transaction]) -> Double {
-        filteredTransactions(transactions)
+        periodFilteredTransactions(transactions)
             .filter { $0.type == .expense }
             .reduce(0) { $0 + $1.amount }
     }
     
     func balance(_ transactions: [Transaction]) -> Double {
         totalIncome(transactions) - totalExpenses(transactions)
+    }
+    
+    // MARK: - All-Time Totals (To avoid manual calculation)
+    
+    func totalIncomeAllTime(_ transactions: [Transaction]) -> Double {
+        transactions
+            .filter { $0.type == .income }
+            .reduce(0) { $0 + $1.amount }
+    }
+    
+    func totalExpensesAllTime(_ transactions: [Transaction]) -> Double {
+        transactions
+            .filter { $0.type == .expense }
+            .reduce(0) { $0 + $1.amount }
+    }
+    
+    func balanceAllTime(_ transactions: [Transaction]) -> Double {
+        totalIncomeAllTime(transactions) - totalExpensesAllTime(transactions)
+    }
+    
+    // MARK: - Month & Today Stats
+    
+    func monthIncome(_ transactions: [Transaction]) -> Double {
+        transactions
+            .filter { $0.type == .income && $0.date.isThisMonth }
+            .reduce(0) { $0 + $1.amount }
+    }
+    
+    func monthExpenses(_ transactions: [Transaction]) -> Double {
+        transactions
+            .filter { $0.type == .expense && $0.date.isThisMonth }
+            .reduce(0) { $0 + $1.amount }
     }
     
     func todayExpenses(_ transactions: [Transaction]) -> Double {
@@ -65,9 +147,11 @@ class FinanceViewModel {
             .reduce(0) { $0 + $1.amount }
     }
     
-    /// Get expenses grouped by category
+    // MARK: - Category Breakdowns
+    
+    /// Get expenses grouped by category for selected period
     func expensesByCategory(_ transactions: [Transaction]) -> [(category: String, amount: Double, percentage: Double)] {
-        let expenses = filteredTransactions(transactions).filter { $0.type == .expense }
+        let expenses = periodFilteredTransactions(transactions).filter { $0.type == .expense }
         let total = expenses.reduce(0) { $0 + $1.amount }
         
         guard total > 0 else { return [] }
@@ -75,6 +159,23 @@ class FinanceViewModel {
         var categoryTotals: [String: Double] = [:]
         for expense in expenses {
             categoryTotals[expense.category, default: 0] += expense.amount
+        }
+        
+        return categoryTotals
+            .map { (category: $0.key, amount: $0.value, percentage: $0.value / total) }
+            .sorted { $0.amount > $1.amount }
+    }
+    
+    /// Get income grouped by category for selected period
+    func incomeByCategory(_ transactions: [Transaction]) -> [(category: String, amount: Double, percentage: Double)] {
+        let incomes = periodFilteredTransactions(transactions).filter { $0.type == .income }
+        let total = incomes.reduce(0) { $0 + $1.amount }
+        
+        guard total > 0 else { return [] }
+        
+        var categoryTotals: [String: Double] = [:]
+        for income in incomes {
+            categoryTotals[income.category, default: 0] += income.amount
         }
         
         return categoryTotals

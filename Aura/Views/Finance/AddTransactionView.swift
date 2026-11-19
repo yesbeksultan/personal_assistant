@@ -7,11 +7,16 @@ struct AddTransactionView: View {
     
     @State private var title = ""
     @State private var amountText = ""
-    @State private var type: TransactionType = .expense
-    @State private var category = "🍔 Еда"
+    @State private var type: TransactionType
+    @State private var category: String
     @State private var date = Date()
     @State private var note = ""
     @State private var showAddCategorySheet = false
+    
+    init(initialType: TransactionType = .expense) {
+        _type = State(initialValue: initialType)
+        _category = State(initialValue: initialType == .income ? "💼 Зарплата" : "🍔 Еда")
+    }
     
     var categories: [String] {
         FinanceCategoryStore.shared.allCategories(for: type)

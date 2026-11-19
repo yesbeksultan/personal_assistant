@@ -8,6 +8,7 @@ struct FinanceView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel = FinanceViewModel()
     @State private var showAddTransaction = false
+    @State private var addTransactionType: TransactionType = .expense
     @State private var editingTransaction: Transaction? = nil
     @State private var isSensitiveUnlocked: Bool = false
     @State private var authError: String? = nil
@@ -38,9 +39,9 @@ struct FinanceView: View {
                     VStack(spacing: 16) {
                         PendingDraftsBanner()
                         ClipboardDetectedBanner()
-                        balanceCard
+                        sectionPicker
                         periodPicker
-                        incomeExpenseRow
+                        heroCardSection
                         categoryBreakdown
                         transactionsList
                     }
@@ -102,14 +103,19 @@ struct FinanceView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAddTransaction = true } label: {
+                    Button {
+                        addTransactionType = (viewModel.selectedSection == .income) ? .income : .expense
+                        showAddTransaction = true
+                    } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 17, weight: .regular))
                             .foregroundStyle(AppColors.textPrimary.opacity(0.65))
                     }
                 }
             }
-            .sheet(isPresented: $showAddTransaction) { AddTransactionView() }
+            .sheet(isPresented: $showAddTransaction) {
+                AddTransactionView(initialType: addTransactionType)
+            }
             .sheet(
                 isPresented: Binding(
                     get: { editingTransaction != nil },
@@ -232,40 +238,379 @@ struct FinanceView: View {
         }
     }
     
-    // MARK: - Balance Card
-    private var balanceCard: some View {
-        VStack(spacing: 6) {
-            Text("Баланс")
-                .font(.system(size: 13))
-                .foregroundStyle(AppColors.textPrimary.opacity(0.4))
-            let bal = viewModel.balance(transactions)
-            if isSensitiveUnlocked {
-                Text(bal.currencyFormatted)
-                    .font(.system(size: 34, weight: .semibold, design: .rounded))
-                    .foregroundStyle(bal >= 0 ? Color(hex: "43e97b") : Color(hex: "fa709a"))
-            } else {
-                Text("••••••")
-                    .font(.system(size: 34, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+    // MARK: - Section Picker (Расходы / Доходы / Обзор)
+    private var sectionPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(FinanceViewModel.FinanceSection.allCases) { section in
                 Button {
-                    authenticate()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                        viewModel.selectedSection = section
+                    }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: biometricIcon)
-                        Text("Показать")
+                        Image(systemName: section.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(section.rawValue)
+                            .font(.system(size: 13, weight: .semibold))
                     }
-                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(viewModel.selectedSection == section ? .white : AppColors.textPrimary.opacity(0.55))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(
+                        Group {
+                            if viewModel.selectedSection == section {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(section.accentColor)
+                                    .shadow(color: section.accentColor.opacity(0.35), radius: 6, y: 3)
+                            } else {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(AppColors.textPrimary.opacity(0.04))
+                            }
+                        }
+                    )
                 }
-                .foregroundStyle(Color(hex: "667eea"))
             }
         }
-        .frame(maxWidth: .infinity).padding(24)
+        .padding(4)
         .background(AppColors.textPrimary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+    
+    // MARK: - Hero Card Section
+    @ViewBuilder
+    private var heroCardSection: some View {
+        switch viewModel.selectedSection {
+        case .income:
+            incomeHeroCard
+        case .expenses:
+            expenseHeroCard
+        case .all:
+            overviewBalanceCard
+        }
+    }
+    
+    // MARK: - Income Hero Card
+    private var incomeHeroCard: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.left")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color(hex: "43e97b"))
+                        Text("Доходы (\(viewModel.selectedPeriod.rawValue.lowercased()))")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                    }
+                    
+                    let income = viewModel.totalIncome(transactions)
+                    if isSensitiveUnlocked {
+                        Text(income.currencyFormatted)
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(hex: "43e97b"))
+                    } else {
+                        lockedAmountView
+                    }
+                }
+                
+                Spacer()
+                
+                Button {
+                    addTransactionType = .income
+                    showAddTransaction = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                        Text("Доход")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(hex: "43e97b"))
+                    .clipShape(Capsule())
+                }
+            }
+            
+            Divider().opacity(0.4)
+            
+            // Sub-stats (Total all-time, month, today)
+            HStack(spacing: 8) {
+                statBox(
+                    title: "За всё время",
+                    amount: viewModel.totalIncomeAllTime(transactions),
+                    color: Color(hex: "43e97b"),
+                    icon: "sparkles"
+                )
+                statBox(
+                    title: "В этом месяце",
+                    amount: viewModel.monthIncome(transactions),
+                    color: Color(hex: "43e97b"),
+                    icon: "calendar"
+                )
+                statBox(
+                    title: "Сегодня",
+                    amount: viewModel.todayIncome(transactions),
+                    color: Color(hex: "43e97b"),
+                    icon: "sun.max.fill"
+                )
+            }
+        }
+        .padding(18)
+        .background(Color(hex: "43e97b").opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color(hex: "43e97b").opacity(0.2), lineWidth: 1)
+        )
+    }
+    
+    // MARK: - Expense Hero Card
+    private var expenseHeroCard: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Color(hex: "fa709a"))
+                        Text("Расходы (\(viewModel.selectedPeriod.rawValue.lowercased()))")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                    }
+                    
+                    let expense = viewModel.totalExpenses(transactions)
+                    if isSensitiveUnlocked {
+                        Text(expense.currencyFormatted)
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(hex: "fa709a"))
+                    } else {
+                        lockedAmountView
+                    }
+                }
+                
+                Spacer()
+                
+                Button {
+                    addTransactionType = .expense
+                    showAddTransaction = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                        Text("Расход")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(hex: "fa709a"))
+                    .clipShape(Capsule())
+                }
+            }
+            
+            Divider().opacity(0.4)
+            
+            // Sub-stats (Total all-time, month, today)
+            HStack(spacing: 8) {
+                statBox(
+                    title: "За всё время",
+                    amount: viewModel.totalExpensesAllTime(transactions),
+                    color: Color(hex: "fa709a"),
+                    icon: "sparkles"
+                )
+                statBox(
+                    title: "В этом месяце",
+                    amount: viewModel.monthExpenses(transactions),
+                    color: Color(hex: "fa709a"),
+                    icon: "calendar"
+                )
+                statBox(
+                    title: "Сегодня",
+                    amount: viewModel.todayExpenses(transactions),
+                    color: Color(hex: "fa709a"),
+                    icon: "sun.max.fill"
+                )
+            }
+        }
+        .padding(18)
+        .background(Color(hex: "fa709a").opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color(hex: "fa709a").opacity(0.2), lineWidth: 1)
+        )
+    }
+    
+    // MARK: - Overview Balance Card
+    private var overviewBalanceCard: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 4) {
+                Text("Баланс за период (\(viewModel.selectedPeriod.rawValue.lowercased()))")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                let bal = viewModel.balance(transactions)
+                if isSensitiveUnlocked {
+                    Text(bal.currencyFormatted)
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(bal >= 0 ? Color(hex: "43e97b") : Color(hex: "fa709a"))
+                } else {
+                    lockedAmountView
+                }
+            }
+            
+            Divider().opacity(0.4)
+            
+            HStack(spacing: 12) {
+                // Clickable Income chip
+                Button {
+                    withAnimation(.spring(response: 0.3)) {
+                        viewModel.selectedSection = .income
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.down.left")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color(hex: "43e97b"))
+                            Text("Доходы")
+                                .font(.caption).fontWeight(.medium)
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.3))
+                        }
+                        if isSensitiveUnlocked {
+                            Text(viewModel.totalIncome(transactions).currencyFormatted)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color(hex: "43e97b"))
+                        } else {
+                            Text("••••••")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(hex: "43e97b").opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                
+                // Clickable Expense chip
+                Button {
+                    withAnimation(.spring(response: 0.3)) {
+                        viewModel.selectedSection = .expenses
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(Color(hex: "fa709a"))
+                            Text("Расходы")
+                                .font(.caption).fontWeight(.medium)
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.6))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.3))
+                        }
+                        if isSensitiveUnlocked {
+                            Text(viewModel.totalExpenses(transactions).currencyFormatted)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(Color(hex: "fa709a"))
+                        } else {
+                            Text("••••••")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+                        }
+                    }
+                    .padding(12)
+                    .background(Color(hex: "fa709a").opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
+            
+            // All-time summary line (User can see both all-time totals directly!)
+            HStack {
+                HStack(spacing: 4) {
+                    Text("Всего доходов:")
+                        .font(.caption2)
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+                    Text(isSensitiveUnlocked ? viewModel.totalIncomeAllTime(transactions).currencyFormatted : "••••")
+                        .font(.caption2).fontWeight(.semibold)
+                        .foregroundStyle(Color(hex: "43e97b"))
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    Text("Всего трат:")
+                        .font(.caption2)
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+                    Text(isSensitiveUnlocked ? viewModel.totalExpensesAllTime(transactions).currencyFormatted : "••••")
+                        .font(.caption2).fontWeight(.semibold)
+                        .foregroundStyle(Color(hex: "fa709a"))
+                }
+            }
+            .padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity).padding(20)
+        .background(AppColors.textPrimary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
                 .stroke(AppColors.textPrimary.opacity(0.07), lineWidth: 1)
         )
+    }
+    
+    // MARK: - Stat Box Helper
+    private func statBox(title: String, amount: Double, color: Color, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9))
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(AppColors.textPrimary.opacity(0.45))
+            
+            if isSensitiveUnlocked {
+                Text(amount.currencyFormatted)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppColors.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            } else {
+                Text("••••")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(AppColors.textPrimary.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+    
+    // MARK: - Locked Amount View
+    private var lockedAmountView: some View {
+        HStack(spacing: 8) {
+            Text("••••••")
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(AppColors.textPrimary.opacity(0.5))
+            Button {
+                authenticate()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: biometricIcon)
+                    Text("Показать")
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(hex: "667eea").opacity(0.15))
+                .clipShape(Capsule())
+            }
+            .foregroundStyle(Color(hex: "667eea"))
+        }
     }
 
     /// Returns the appropriate biometric icon name for the device
@@ -287,7 +632,7 @@ struct FinanceView: View {
                 } label: {
                     Text(period.rawValue).font(.system(size: 13, weight: .medium))
                         .foregroundStyle(viewModel.selectedPeriod == period ? AppColors.textPrimary : AppColors.textPrimary.opacity(0.4))
-                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .frame(maxWidth: .infinity).padding(.vertical, 9)
                         .background(viewModel.selectedPeriod == period ? Color(hex: "667eea").opacity(0.4) : Color.clear)
                         .clipShape(Capsule())
                 }
@@ -296,52 +641,31 @@ struct FinanceView: View {
         .padding(4).background(AppColors.textPrimary.opacity(0.05)).clipShape(Capsule())
     }
     
-    // MARK: - Income/Expense Row
-    private var incomeExpenseRow: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: "arrow.down.left").font(.system(size: 12)).foregroundStyle(Color(hex: "43e97b"))
-                    Text("Доходы").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.6))
-                }
-                if isSensitiveUnlocked {
-                    Text(viewModel.totalIncome(transactions).currencyFormatted)
-                        .font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(AppColors.textPrimary)
-                } else {
-                    Text("••••••")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-            .background(Color(hex: "43e97b").opacity(0.1)).clipShape(RoundedRectangle(cornerRadius: 16))
-            
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: "arrow.up.right").font(.system(size: 12)).foregroundStyle(Color(hex: "fa709a"))
-                    Text("Расходы").font(.caption).foregroundStyle(AppColors.textPrimary.opacity(0.6))
-                }
-                if isSensitiveUnlocked {
-                    Text(viewModel.totalExpenses(transactions).currencyFormatted)
-                        .font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(AppColors.textPrimary)
-                } else {
-                    Text("••••••")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(AppColors.textPrimary.opacity(0.5))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-            .background(Color(hex: "fa709a").opacity(0.1)).clipShape(RoundedRectangle(cornerRadius: 16))
-        }
-    }
-    
     // MARK: - Category Breakdown
     private var categoryBreakdown: some View {
-        let categories = viewModel.expensesByCategory(transactions)
+        let categories: [(category: String, amount: Double, percentage: Double)]
+        let breakdownTitle: String
+        let barGradient: [Color]
+        
+        switch viewModel.selectedSection {
+        case .income:
+            categories = viewModel.incomeByCategory(transactions)
+            breakdownTitle = "Доходы по категориям"
+            barGradient = [Color(hex: "43e97b"), Color(hex: "38f9d7")]
+        case .expenses:
+            categories = viewModel.expensesByCategory(transactions)
+            breakdownTitle = "Расходы по категориям"
+            barGradient = [Color(hex: "fa709a"), Color(hex: "fee140")]
+        case .all:
+            categories = viewModel.expensesByCategory(transactions)
+            breakdownTitle = "Расходы по категориям"
+            barGradient = AppGradients.purple
+        }
+        
         return Group {
             if !categories.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("По категориям").font(.headline).foregroundStyle(AppColors.textPrimary)
+                    Text(breakdownTitle).font(.headline).foregroundStyle(AppColors.textPrimary)
                     ForEach(categories, id: \.category) { item in
                         HStack {
                             Text(item.category).font(.subheadline).foregroundStyle(AppColors.textPrimary)
@@ -356,7 +680,7 @@ struct FinanceView: View {
                         }
                         GeometryReader { geo in
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(LinearGradient(colors: AppGradients.purple, startPoint: .leading, endPoint: .trailing))
+                                .fill(LinearGradient(colors: barGradient, startPoint: .leading, endPoint: .trailing))
                                 .frame(width: isSensitiveUnlocked ? geo.size.width * item.percentage : 0, height: 6)
                         }.frame(height: 6)
                     }
@@ -369,12 +693,31 @@ struct FinanceView: View {
     // MARK: - Transactions List
     private var transactionsList: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Транзакции").font(.headline).foregroundStyle(AppColors.textPrimary)
+            HStack {
+                Text(listTitle).font(.headline).foregroundStyle(AppColors.textPrimary)
+                Spacer()
+                let filtered = viewModel.filteredTransactions(transactions)
+                Text("\(filtered.count)")
+                    .font(.caption).fontWeight(.semibold)
+                    .foregroundStyle(viewModel.selectedSection.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(viewModel.selectedSection.accentColor.opacity(0.15))
+                    .clipShape(Capsule())
+            }
             
             let filtered = viewModel.filteredTransactions(transactions)
             if filtered.isEmpty {
-                Text("Нет транзакций").font(.subheadline).foregroundStyle(AppColors.textPrimary.opacity(0.4))
-                    .frame(maxWidth: .infinity).padding(20)
+                VStack(spacing: 8) {
+                    Image(systemName: viewModel.selectedSection == .income ? "tray" : "cart")
+                        .font(.system(size: 28))
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.2))
+                    Text(emptyListMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(AppColors.textPrimary.opacity(0.4))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
             } else {
                 ForEach(filtered, id: \.id) { tx in
                     TransactionRow(transaction: tx, isSensitiveUnlocked: isSensitiveUnlocked)
@@ -409,8 +752,44 @@ struct FinanceView: View {
                         }
                 }
             }
+            
+            // In-section quick add button
+            if viewModel.selectedSection != .all {
+                Button {
+                    addTransactionType = (viewModel.selectedSection == .income) ? .income : .expense
+                    showAddTransaction = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.circle.fill")
+                        Text(viewModel.selectedSection == .income ? "Добавить доход" : "Добавить расход")
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(viewModel.selectedSection.accentColor)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(viewModel.selectedSection.accentColor.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.top, 4)
+            }
         }
         .padding(16).background(AppColors.textPrimary.opacity(0.05)).clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+    
+    private var listTitle: String {
+        switch viewModel.selectedSection {
+        case .income:   return "История доходов"
+        case .expenses: return "История расходов"
+        case .all:      return "Все транзакции"
+        }
+    }
+    
+    private var emptyListMessage: String {
+        switch viewModel.selectedSection {
+        case .income:   return "Нет доходов за этот период"
+        case .expenses: return "Нет расходов за этот период"
+        case .all:      return "Нет транзакций за этот период"
+        }
     }
     
     private func authenticate() {
